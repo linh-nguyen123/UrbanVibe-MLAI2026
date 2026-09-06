@@ -181,7 +181,7 @@ UrbanVibe-MLAI2026/
 
 ### Bước 1: Clone repository và tạo môi trường ảo
 ```bash
-git clone https://github.com/linh-nguyen123/UrbanVibe-MLAI2026.git
+git clone https://github.com/<username>/UrbanVibe-MLAI2026.git
 cd UrbanVibe-MLAI2026
 
 # Khởi tạo môi trường ảo Python
