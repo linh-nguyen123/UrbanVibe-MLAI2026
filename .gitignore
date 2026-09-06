@@ -1,0 +1,22 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Model weights & Large audio
+*.wav
+*.mp3
+*.tflite
+*.tar.gz
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
