@@ -45,7 +45,7 @@
 > Tại Việt Nam, có hơn **2.5 triệu người khiếm thính và suy giảm thính lực**. Trong điều kiện giao thông hỗn hợp phức tạp, **còi xe và còi ưu tiên** là tín hiệu cảnh báo va chạm sống còn. Người khiếm thính gần như mất hoàn toàn khả năng nhận diện mối nguy hiểm này từ phía sau.
 
 **UrbanVibe** là giải pháp phần mềm chạy hoàn toàn trên thiết bị biên (**Edge-AI**) nhằm bảo vệ an toàn tính mạng cho người khiếm thính khi tham gia giao thông:
-* **Chuyển đổi Âm thanh $\rightarrow$ Xúc giác & Thị giác:** Nhận biết các âm thanh nguy hiểm và phản hồi tức thời qua nhịp rung xúc giác (Haptic Pulses) và nhấp nháy thị giác trực quan (Visual Flash).
+* **Chuyển đổi Âm thanh → Xúc giác & Thị giác:** Nhận biết các âm thanh nguy hiểm và phản hồi tức thời qua nhịp rung xúc giác (Haptic Pulses) và nhấp nháy thị giác trực quan (Visual Flash).
 * **100% On-Device & Bảo vệ Quyền riêng tư:** Không lưu trữ, không gửi bất kỳ mẫu giọng nói hay âm thanh nào lên máy chủ đám mây. Hoạt động liên tục ngoại tuyến (Offline) kể cả khi đi vào vùng mất sóng 4G/5G.
 
 ---
@@ -68,7 +68,14 @@
 Môi trường đô thị Việt Nam có mức ồn nền rất lớn (65 – 80 dB). Các mô hình AI thông thường khi nghe tiếng tivi, tiếng radio hoặc tiếng còi ở khoảng cách rất xa sẽ gây hiện tượng **báo động giả liên tục (False Alarm Fatigue)**.
 
 UrbanVibe giải quyết bài toán này bằng thuật toán cổng kép:
-$$\text{Trigger} = \Big( \text{Class} \in \{\text{HORN}, \text{SIREN}\} \land \text{Confidence} \ge \tau_{\text{AI}} \Big) \;\mathbf{AND}\; \Big( \text{dB}_{\text{SPL}} \ge \tau_{\text{dB}} \;\mathbf{OR}\; \Delta\text{dB} \ge \Delta_{\text{thresh}} \Big)$$
+
+$$
+\text{Trigger} = (\text{Class} \in \{\text{HORN}, \text{SIREN}\} \land \text{Confidence} \ge \tau_{\text{AI}}) \land (\text{dB}_{\text{SPL}} \ge \tau_{\text{dB}} \lor \Delta\text{dB} \ge \Delta_{\text{thresh}})
+$$
+
+Trong đó:
+* **Semantic Gate (Lớp AI):** Xác thực nhãn âm thanh thuộc nhóm nguy hiểm (`HORN`, `SIREN`) với độ tin cậy $\ge \tau_{\text{AI}}$.
+* **Physical Gate (Lớp DSP):** Cường độ âm thanh tức thời $\ge \tau_{\text{dB}}$ (mặc định $\ge 75\,\text{dB}$) hoặc tăng đột biến $\Delta\text{dB} \ge +12\,\text{dB}$ so với mức ồn nền.
 
 ```
 Tín hiệu Micro (16kHz)
