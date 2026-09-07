@@ -44,9 +44,35 @@
 > [!IMPORTANT]
 > Tại Việt Nam, có hơn **2.5 triệu người khiếm thính và suy giảm thính lực**. Trong điều kiện giao thông hỗn hợp phức tạp, **còi xe và còi ưu tiên** là tín hiệu cảnh báo va chạm sống còn. Người khiếm thính gần như mất hoàn toàn khả năng nhận diện mối nguy hiểm này từ phía sau.
 
-**UrbanVibe** là giải pháp phần mềm chạy hoàn toàn trên thiết bị biên (**Edge-AI**) nhằm bảo vệ an toàn tính mạng cho người khiếm thính khi tham gia giao thông:
-* **Chuyển đổi Âm thanh → Xúc giác & Thị giác:** Nhận biết các âm thanh nguy hiểm và phản hồi tức thời qua nhịp rung xúc giác (Haptic Pulses) và nhấp nháy thị giác trực quan (Visual Flash).
-* **100% On-Device & Bảo vệ Quyền riêng tư:** Không lưu trữ, không gửi bất kỳ mẫu giọng nói hay âm thanh nào lên máy chủ đám mây. Hoạt động liên tục ngoại tuyến (Offline) kể cả khi đi vào vùng mất sóng 4G/5G.
+**## 📌 Giới thiệu dự án**
+
+**UrbanVibe là giải pháp phần mềm chạy trên thiết bị biên (Edge-AI) nhằm hỗ trợ người khiếm thính tham gia giao thông an toàn:**
+
+**- \*\*Audio DSP + Acoustic AI:\*\* Thu âm liên tục 16kHz, phân loại âm thanh thời gian thực với \*\*YAMNet\*\* (Google).**
+
+**- \*\*Bộ lọc ngưỡng kép (Dual-Threshold Gate):\*\* Kết hợp nhãn dự đoán AI cùng phép đo Decibel/RMS tức thời để loại bỏ hơn 98% báo động giả từ tiếng ồn phố thị.**
+
+**- \*\*Cảnh báo đa phương thức:\*\* Cảnh báo nhấp nháy viền thị giác (Visual Flash) và xung động xúc giác (Haptic Vibration) đa nhịp độ.**
+
+**- \*\*100% On-Device:\*\* Vận hành hoàn toàn ngoại tuyến (Offline), bảo đảm quyền riêng tư âm thanh và tính sẵn sàng cao khi di chuyển ngoài đường phố.**
+
+
+
+**---**
+
+
+
+**## 🛠️ Cài đặt môi trường**
+
+
+
+**1. Clone repository:**
+
+**```bash**
+
+**git clone https://github.com/linh-nguyen123/UrbanVibe-MLAI2026.git**
+
+**cd UrbanVibe-MLAI2026**
 
 ---
 

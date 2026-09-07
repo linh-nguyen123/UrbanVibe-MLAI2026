@@ -1,59 +1,60 @@
+import sys
 import time
+from pathlib import Path
 import numpy as np
 import sounddevice as sd
-import tensorflow_hub as hub
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from engine.tflite_yamnet import YAMNetEngine
 
 print("=" * 55)
-print("   URBANVIBE - KIỂM TRA MICRO & MÔ HÌNH YAMNET (PAIR 1)   ")
+print("URBANVIBE - MICROPHONE & ON-DEVICE YAMNET TFLITE TEST")
 print("=" * 55)
 
-# 1. Tải mô hình YAMNet từ TensorFlow Hub
-print("\n[1/3] Đang tải mô hình YAMNet (lần đầu sẽ mất khoảng 1 phút)...")
+# 1. Initialize local on-device model
+print("\n[1/3] Loading YAMNet TFLite On-Device model (offline 3.7MB)...")
 try:
-    yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
-    class_map_path = yamnet_model.class_map_path().numpy().decode("utf-8")
-    class_names = [line.strip().split(",")[2] for line in open(class_map_path).readlines()[1:]]
-    print(" -> Tải mô hình YAMNet thành công!")
+    engine = YAMNetEngine()
+    print(" -> Loaded YAMNet TFLite engine successfully!")
 except Exception as e:
-    print(f" -> [LỖI] Không tải được mô hình: {e}")
-    exit()
+    print(f" -> Error loading model: {e}")
+    sys.exit(1)
 
-# 2. Thu âm trực tiếp từ micro vật lý
+# 2. Record audio from physical microphone
 SAMPLE_RATE = 16000
-DURATION = 0.975  # Cửa sổ đầu vào chuẩn của YAMNet (15,600 mẫu)
+DURATION = 0.975  # Standard YAMNet input window (15600 samples)
 
-print(f"\n[2/3] Đang mở micro thu âm trong {DURATION} giây...")
-print(" -> Hãy thử vỗ tay, huýt sáo hoặc nói vào mic...")
+print(f"\n[2/3] Opening microphone to record {DURATION} seconds...")
+print(" -> Make sound (whistle, clap, talk)...")
 try:
-    recording = sd.rec(int(DURATION * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=1, dtype="float32")
+    recording = sd.rec(
+        int(DURATION * SAMPLE_RATE),
+        samplerate=SAMPLE_RATE,
+        channels=1,
+        dtype="float32",
+    )
     sd.wait()
     waveform = np.squeeze(recording)
-    print(" -> Thu âm thành công!")
+    print(" -> Recorded audio successfully!")
 except Exception as e:
-    print(f" -> [LỖI] Micro không hoạt động hoặc bị chặn quyền: {e}")
-    exit()
+    print(f" -> Microphone unavailable or permission denied: {e}")
+    sys.exit(1)
 
-# 3. Tính toán Decibel và chạy suy luận AI
-print("\n[3/3] Đang phân loại phổ âm thanh...")
+# 3. Analyze audio and run AI inference
+print("\n[3/3] Analyzing audio with Dual-Threshold Gate...")
 start_time = time.time()
-scores, embeddings, spectrogram = yamnet_model(waveform)
+payload = engine.process_audio(waveform)
 latency = (time.time() - start_time) * 1000
 
-# Tính năng lượng RMS và Decibel tương đối
-rms = np.sqrt(np.mean(waveform**2))
-db = 20 * np.log10(rms + 1e-6) + 100
-
-# Trích xuất top 3 nhãn có xác suất cao nhất
-mean_scores = np.mean(scores.numpy(), axis=0)
-top_indices = np.argsort(mean_scores)[::-1][:3]
-
 print("\n" + "-" * 50)
-print("             KẾT QUẢ PHÂN TÍCH ÂM THANH             ")
+print("             AUDIO ANALYSIS RESULT             ")
 print("-" * 50)
-print(f"• Cường độ âm lượng: {db:.1f} dB (RMS: {rms:.4f})")
-print(f"• Thời gian suy luận: {latency:.2f} ms")
-print("• Top 3 nhãn nhận diện được:")
-for rank, idx in enumerate(top_indices, 1):
-    print(f"   {rank}. {class_names[idx]:<30} | {mean_scores[idx] * 100:.1f}%")
+print(f"Sound Level: {payload.db:.1f} dB SPL")
+print(f"Hazard Status: {payload.danger_type} (Danger: {payload.is_danger})")
+print(f"Identified Label: {payload.label} ({payload.confidence * 100:.1f}%)")
+print(f"Processing Latency: {latency:.2f} ms")
 print("-" * 50)
-print("[✓] Pipeline Audio & Model hoạt động bình thường!\n")
+print("Audio & Model Pipeline operational.")
