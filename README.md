@@ -36,7 +36,7 @@
 
 **```bash**
 
-**git clone \[https://github.com/](https://github.com/)linh-nguyen123/UrbanVibe-MLAI2026.git**
+**git clone https://github.com/linh-nguyen123/UrbanVibe-MLAI2026.git**
 
 **cd UrbanVibe-MLAI2026**
 
