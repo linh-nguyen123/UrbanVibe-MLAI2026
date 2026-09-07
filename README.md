@@ -181,7 +181,7 @@ UrbanVibe-MLAI2026/
 
 ### Bước 1: Clone repository và tạo môi trường ảo
 ```bash
-git clone https://github.com/<username>/UrbanVibe-MLAI2026.git
+git clone https://github.com/linh-nguyen123/UrbanVibe-MLAI2026.git
 cd UrbanVibe-MLAI2026
 
 # Khởi tạo môi trường ảo Python
@@ -249,7 +249,3 @@ Dự án được chuẩn bị kịch bản kiểm thử trực quan trong 3 ph�
 * **Bản quyền:** Mã nguồn được phân phối dưới giấy phép [MIT License](LICENSE).
 * **Đội thi:** Thành viên đội dự thi **MLAI Hackathon 2026** – Mạng lưới Trí tuệ Nhân tạo, Trường Đại học Bách Khoa – ĐHQG TP.HCM.
 * **Liên hệ & Đóng góp:** Mọi ý kiến đóng góp xin vui lòng mở [GitHub Issue](https://github.com/linh-nguyen123/UrbanVibe-MLAI2026/issues) hoặc gửi Pull Request.
-
-<div align="center">
-  <sub>Xây dựng với niềm đam mê công nghệ và trách nhiệm cộng đồng tại MLAI Hackathon 2026 🇻🇳</sub>
-</div>
