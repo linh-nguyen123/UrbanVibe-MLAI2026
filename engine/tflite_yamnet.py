@@ -8,20 +8,24 @@ from data_contract import DetectionPayload
 from engine.dsp_filter import DSPAnalyzer
 
 class YAMNetEngine:
-    # Hierarchical label pooling categories
+    # Hierarchical label pooling categories matching YAMNet CSV display_name
     HORN_CLASSES = {
-        "Vehicle horn, car horn",
-        "Air horn",
+        "Vehicle horn, car horn, honking",
+        "Air horn, truck horn",
+        "Train horn",
         "Toot",
-        "Honk",
         "Beep, bleep",
         "Bicycle bell",
+        "Reversing beeps",
+        "Alarm",
+        "Car alarm",
+        "Buzzer",
     }
     SIREN_CLASSES = {
         "Siren",
         "Ambulance (siren)",
-        "Fire engine siren",
-        "Police car siren",
+        "Fire engine, fire truck (siren)",
+        "Police car (siren)",
         "Civil defense siren",
     }
 
@@ -59,6 +63,11 @@ class YAMNetEngine:
         )
         self.interpreter.allocate_tensors()
 
+        # Warm-up TFLite runtime to eliminate Cold-Start latency
+        dummy_tensor = np.zeros(self.window_size, dtype=np.float32)
+        self.interpreter.set_tensor(self.input_details[0]["index"], dummy_tensor)
+        self.interpreter.invoke()
+
         # DSP Analyzer for Physical Gate
         self.dsp = DSPAnalyzer(
             db_threshold=db_threshold,
@@ -70,7 +79,8 @@ class YAMNetEngine:
         """
         Process audio window through DSP Physical Gate and YAMNet Semantic Gate.
         """
-        start_time = time.time()
+        start_time = time.perf_counter()
+        now_epoch = time.time()
 
         # Ensure correct float32 format and size
         if len(waveform) != self.window_size:
@@ -136,10 +146,10 @@ class YAMNetEngine:
             confidence = top_conf
             is_danger = False
 
-        latency_ms = (time.time() - start_time) * 1000.0
+        latency_ms = (time.perf_counter() - start_time) * 1000.0
 
         return DetectionPayload(
-            timestamp=time.time(),
+            timestamp=now_epoch,
             db=round(db, 1),
             is_danger=is_danger,
             danger_type=danger_type,
