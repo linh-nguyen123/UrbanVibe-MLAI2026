@@ -204,7 +204,7 @@ class MainEngine:
             danger_type=danger_type,
             label=payload.label,
             confidence=payload.confidence,
-            latency_ms=round(elapsed_ms, 1),
+            latency_ms=payload.latency_ms,
         )
 
         self._latest_payload = final_payload

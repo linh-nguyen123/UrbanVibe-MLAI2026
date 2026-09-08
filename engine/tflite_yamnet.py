@@ -43,13 +43,25 @@ class YAMNetEngine:
         self.window_size = window_size
 
         # Load class map
+        import csv
         class_map_file = self.model_dir / "yamnet_class_map.csv"
         self.class_names = []
         with open(class_map_file, "r", encoding="utf-8") as f:
-            lines = f.readlines()[1:]
-            for line in lines:
-                parts = line.strip().split(",")
-                self.class_names.append(parts[2].strip('"'))
+            reader = csv.reader(f)
+            next(reader, None)  # Skip header row
+            for row in reader:
+                if len(row) >= 3:
+                    self.class_names.append(row[2].strip())
+
+        # Precompute label pooling indices to avoid repeated string checks
+        self.horn_indices = np.array([
+            i for i, name in enumerate(self.class_names)
+            if (name in self.HORN_CLASSES or any(k in name.lower() for k in ["horn", "honk", "toot", "beep", "alarm", "buzzer", "bell"]))
+        ], dtype=np.int32)
+        self.siren_indices = np.array([
+            i for i, name in enumerate(self.class_names)
+            if (name in self.SIREN_CLASSES or any(k in name.lower() for k in ["siren", "ambulance", "police", "emergency"]))
+        ], dtype=np.int32)
 
         # Initialize TFLite interpreter
         model_file = self.model_dir / "yamnet.tflite"
@@ -108,17 +120,9 @@ class YAMNetEngine:
         else:
             mean_scores = scores
 
-        # 3. Hierarchical Label Pooling
-        horn_score = sum(
-            mean_scores[i]
-            for i, name in enumerate(self.class_names)
-            if name in self.HORN_CLASSES
-        )
-        siren_score = sum(
-            mean_scores[i]
-            for i, name in enumerate(self.class_names)
-            if name in self.SIREN_CLASSES
-        )
+        # 3. Hierarchical Label Pooling (Vectorized numpy sum)
+        horn_score = float(np.sum(mean_scores[self.horn_indices])) if len(self.horn_indices) > 0 else 0.0
+        siren_score = float(np.sum(mean_scores[self.siren_indices])) if len(self.siren_indices) > 0 else 0.0
 
         top_idx = int(np.argmax(mean_scores))
         top_label = self.class_names[top_idx]
@@ -133,17 +137,17 @@ class YAMNetEngine:
         if siren_score >= 0.20 and (is_physical_danger or siren_score >= 0.35):
             danger_type = "EMERGENCY_SIREN"
             label = "Emergency Siren / Ambulance"
-            confidence = float(siren_score)
+            confidence = min(1.0, float(siren_score))
             is_danger = True
         elif horn_score >= 0.20 and is_physical_danger:
             danger_type = "VEHICLE_HORN"
             label = "Vehicle Horn / Warning"
-            confidence = float(horn_score)
+            confidence = min(1.0, float(horn_score))
             is_danger = True
         else:
             danger_type = "SAFE"
             label = top_label
-            confidence = top_conf
+            confidence = min(1.0, float(top_conf))
             is_danger = False
 
         latency_ms = (time.perf_counter() - start_time) * 1000.0
