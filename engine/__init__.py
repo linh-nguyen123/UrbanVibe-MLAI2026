@@ -1,8 +1,6 @@
-from engine.audio_stream import AudioStreamWorker
-from engine.dsp_filter import DSPAnalyzer
-from engine.haptic_controller import SerialHapticDriver, get_vibration_js
-from engine.main_engine import AudioAIEngine, MainEngine
-from engine.tflite_yamnet import YAMNetEngine
+"""Load engine components only when requested by callers."""
+
+from importlib import import_module
 
 __all__ = [
     "AudioStreamWorker",
@@ -14,3 +12,20 @@ __all__ = [
     "get_vibration_js",
 ]
 
+_MODULES = {
+    "AudioStreamWorker": "engine.audio_stream",
+    "DSPAnalyzer": "engine.dsp_filter",
+    "SerialHapticDriver": "engine.haptic_controller",
+    "get_vibration_js": "engine.haptic_controller",
+    "YAMNetEngine": "engine.tflite_yamnet",
+    "MainEngine": "engine.main_engine",
+    "AudioAIEngine": "engine.main_engine",
+}
+
+
+def __getattr__(name):
+    if name not in _MODULES:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(_MODULES[name]), name)
+    globals()[name] = value
+    return value
