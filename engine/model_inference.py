@@ -84,7 +84,7 @@ class YAMNetEngine:
         result = self.infer(waveform)
         danger_type = "SAFE"
         if result["is_danger"]:
-            danger_type = ("EMERGENCY_SIREN" if "siren" in result["label"].lower()
+            danger_type = ("EMERGENCY_SIREN" if any(k in result["label"].lower() for k in ["siren", "alarm"])
                            else "VEHICLE_HORN")
         return DetectionPayload(timestamp=time.time(), danger_type=danger_type,
                                 latency_ms=(time.perf_counter() - start) * 1000,
