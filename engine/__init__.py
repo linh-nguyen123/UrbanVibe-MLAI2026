@@ -17,7 +17,7 @@ _MODULES = {
     "DSPAnalyzer": "engine.dsp_filter",
     "SerialHapticDriver": "engine.haptic_controller",
     "get_vibration_js": "engine.haptic_controller",
-    "YAMNetEngine": "engine.tflite_yamnet",
+    "YAMNetEngine": "engine.model_inference",
     "MainEngine": "engine.main_engine",
     "AudioAIEngine": "engine.main_engine",
 }

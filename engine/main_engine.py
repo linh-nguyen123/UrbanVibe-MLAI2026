@@ -21,7 +21,7 @@ from data_contract import DetectionPayload
 from engine.audio_stream import AudioStreamWorker
 from engine.dsp_filter import DSPAnalyzer
 from engine.haptic_controller import SerialHapticDriver, get_vibration_js
-from engine.tflite_yamnet import YAMNetEngine
+from engine.model_inference import YAMNetEngine
 
 logger = logging.getLogger("UrbanVibe.MainEngine")
 
@@ -77,7 +77,7 @@ class MainEngine:
         self._latest_payload: Optional[DetectionPayload] = None
         self._stream_callback: Optional[Callable[[DetectionPayload], None]] = None
 
-        # 5. Tự động Warm-up để triệt tiêu Cold-Start Latency (đảm bảo latency < 20ms ngay từ frame đầu tiên)
+        # 5. Warm-up trước khi nhận âm thanh; hiệu năng cần đo trên máy đích.
         self._warmup()
         logger.info("[MainEngine] Khởi tạo hoàn tất. Sẵn sàng vận hành thời gian thực!")
 
@@ -142,14 +142,9 @@ class MainEngine:
         if max_abs > 1.0:
             waveform = waveform / max_abs
 
-        # 5. Cắt hoặc đệm (Zero-padding) về đúng 15,600 mẫu (0.975 giây)
+        # 5. Cắt cửa sổ dài; model_inference đo RMS trước khi đệm cửa sổ ngắn.
         if len(waveform) > self.window_size:
             waveform = waveform[: self.window_size]
-        elif len(waveform) < self.window_size:
-            adjusted = np.zeros(self.window_size, dtype=np.float32)
-            if len(waveform) > 0:
-                adjusted[: len(waveform)] = waveform
-            waveform = adjusted
 
         return waveform
 
@@ -181,10 +176,10 @@ class MainEngine:
 
         if db_threshold is not None or conf_threshold is not None:
             active_db_th = db_threshold if db_threshold is not None else self.db_threshold
-            active_conf_th = conf_threshold if conf_threshold is not None else 0.20
+            active_conf_th = conf_threshold if conf_threshold is not None else 0.60
 
             if danger_type != "SAFE":
-                if payload.db < active_db_th or payload.confidence < active_conf_th:
+                if payload.db <= active_db_th or payload.confidence <= active_conf_th:
                     is_danger = False
                     danger_type = "SAFE"
                 else:
@@ -204,7 +199,7 @@ class MainEngine:
             danger_type=danger_type,
             label=payload.label,
             confidence=payload.confidence,
-            latency_ms=payload.latency_ms,
+            latency_ms=elapsed_ms,
         )
 
         self._latest_payload = final_payload

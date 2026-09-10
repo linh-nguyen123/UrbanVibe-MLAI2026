@@ -1,7 +1,7 @@
 """
 Audio AI Engine sử dụng Google YAMNet TFLite & DSP Dual-Threshold Gate.
 Được tối ưu hoá hoàn toàn cho Edge-AI On-Device (TFLite XNNPACK).
-Độ trễ suy luận: ~14 - 18 ms (hoặc < 10 ms trên CPU hiện đại).
+Độ trễ và RAM được đo bằng tests/benchmark_model_inference.py.
 """
 
 import os
@@ -48,8 +48,8 @@ class AudioAIEngine:
     def infer(
         self,
         waveform_16k: np.ndarray,
-        db_threshold: float = 78.0,
-        conf_threshold: float = 0.35,
+        db_threshold: float = 75.0,
+        conf_threshold: float = 0.60,
         apply_wind_filter: bool = False,
     ) -> DetectionPayload:
         """Thực thi suy luận thông qua TFLite Engine siêu tốc."""

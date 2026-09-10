@@ -47,7 +47,10 @@ def test_samples():
         else:
             waveform = data.astype(np.float32)
             
-        payload = engine.infer(waveform, db_threshold=78.0, conf_threshold=0.35)
+        payload = engine.engine.infer(waveform, sample_rate=sr, trigger_haptic=False)
+        from engine.model_inference import is_dangerous
+        assert payload.is_danger == is_dangerous(payload.label, payload.confidence, payload.db)
+        assert (payload.danger_type != "SAFE") == payload.is_danger
         
         print(f"\n[Test File]: {filename} ({desc})")
         print(f"  ├─ Cường độ đo được (dB): {payload.db:.1f} dB")
