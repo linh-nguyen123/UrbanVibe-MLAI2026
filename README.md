@@ -33,7 +33,7 @@
 
 ## 📌 Tài liệu Đặc tả Kỹ thuật Chi tiết
 > 📖 **Hồ sơ Phản biện Chuyên gia & Đặc tả Kiến trúc Chốt (Golden Master Spec v2.5):**  
-> Xem đầy đủ 12 giải pháp kỹ thuật, phân tích vật lý DoA, thiết kế Watchdog chống lỗi im lặng và chứng minh tuân thủ pháp lý tại: [`docs/URBANVIBE_V2_EXPERT_REVIEW_PACKAGE.md`](docs/URBANVIBE_V2_EXPERT_REVIEW_PACKAGE.md)
+> Xem đầy đủ 12 giải pháp kỹ thuật, phân tích vật lý DoA, thiết kế Watchdog chống lỗi im lặng và chứng minh tuân thủ pháp lý tại: [`docs/ARCHITECTURE_SPEC_V2.5.md`](docs/ARCHITECTURE_SPEC_V2.5.md)
 
 ---
 
@@ -282,8 +282,7 @@ UrbanVibe-MLAI2026/
 ├── README.md                           # [Portal] Tài liệu hướng dẫn & tổng quan dự án
 │
 ├── docs/                               # [Specs] Hồ sơ Kỹ thuật Chuyên sâu
-│   ├── URBANVIBE_V2_EXPERT_REVIEW_PACKAGE.md # Hồ sơ phản biện & đặc tả kiến trúc v2.5 hoàn chỉnh
-│   └── URBANVIBE_EXPERT_REVIEW_BRIEF.md      # Bản tóm tắt dành cho hội đồng chuyên môn
+│   └── ARCHITECTURE_SPEC_V2.5.md       # Hồ sơ đặc tả kiến trúc v2.5 hoàn chỉnh (Golden Master)
 │
 ├── engine/                             # [Core Backend] Xử lý Âm thanh, AI & Ra quyết định
 │   ├── __init__.py
