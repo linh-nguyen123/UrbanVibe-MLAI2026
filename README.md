@@ -146,24 +146,35 @@ flowchart TB
 
 ---
 
-## 📊 5. Thông số kỹ thuật & Bảng BOM phần cứng
+## 📱 5. Chiến lược Triển khai 2 Giai đoạn: Software-First MVP & Lộ trình Phần cứng Chuyên dụng
 
-### 5.1. Dự toán BOM Linh kiện Chế tạo Mẫu Prototype
+Nhằm giải quyết triệt để bài toán **rào cản chi phí tiếp cận cho 2.5 triệu người khiếm thính tại Việt Nam** và tập trung tối đa nguồn lực hoàn thiện thuật toán AI & Decision Intelligence theo phương pháp Lean Agile, dự án phân định rõ 2 giai đoạn:
 
-| Hạng mục Linh kiện | Thông số Kỹ thuật & Model | Đơn giá ước tính |
-| :--- | :--- | :---: |
-| **Mảng 3x MEMS Micro** | Knowles SPH0645 / ST MP34DT01 (PDM/I2S, SNR 65dB, bọc mút lọc gió) | ~120.000 VNĐ |
-| **MCU Cụm Cảm biến Pod** | ESP32-S3 (Giải mã PDM/I2S + USB Audio Class 2.0 UAC2 OTG) | ~95.000 VNĐ |
-| **Cảm biến Chuyển động** | IMU 6-trục MPU-6050 (Đo rung chấn ghi-đông & gia tốc xe) | ~35.000 VNĐ |
-| **2x MCU Tay nắm Rung** | nRF52840 / ESP32-C3 Mini (BLE 5.2 tích hợp phần cứng Watchdog riêng) | ~160.000 VNĐ |
-| **2x Động cơ Rung & Driver**| Motor LRA Coin Motor + IC Driver TI DRV2605L đo Back-EMF | ~160.000 VNĐ |
-| **2x Gia tốc kế & Pin sạc** | Cảm biến LIS3DHTR kiểm tra rung vòng kín + Pin LiPo 500mAh có BMS | ~140.000 VNĐ |
-| **Phụ kiện, Cáp & Vỏ IP65** | Cáp Type-C ren vặn chống tuột, mút chắn gió, kẹp nhôm CNC, đệm silicon | ~240.000 VNĐ |
-| **DỰ TOÁN BOM LINH KIỆN LÕI** | *(Các module điện tử rời)* | **~950.000 VNĐ** |
-| **TỔNG CHI PHÍ HOÀN CHỈNH** | **Gồm gia công 3 mạch PCB 2 lớp, vỏ in 3D PETG IP65 và công lắp ráp** | **~1.550.000 VNĐ** |
+### 5.1. Giai đoạn 1: Software-First MVP (Chi phí Phần cứng 0 VNĐ - Trọng tâm Hackathon)
+* **Nguyên lý tiếp cận:** Khai thác 100% năng lực phần cứng sẵn có trên smartphone của người dùng, loại bỏ hoàn toàn rào cản tài chính ban đầu.
+* **Cơ chế thu âm & AI:** Sử dụng trực tiếp microphone tích hợp của điện thoại (hoặc tai nghe dây Type-C/3.5mm thông dụng). Xử lý DSP lọc ồn & suy luận YAMNet Edge-AI trực tiếp trên thiết bị (On-device).
+* **Cơ chế phản hồi an toàn:** 
+  - *Thị giác (Visual HUD):* Màn hình điện thoại gắn trên giá đỡ ghi-đông nhấp nháy giao diện tương phản cao (High-Contrast Visual Flash) thông báo hướng và loại phương tiện tiếp cận.
+  - *Xúc giác (Haptic):* Kích hoạt bộ rung sẵn có của điện thoại thông qua **Web Vibration API (`navigator.vibrate`)** hoặc Android Native Haptic Service, truyền xung chấn qua giá đỡ kẹp ghi-đông.
+* **Ra quyết định lộ trình (Pre-Trip MCDA):** Chạy trực tiếp trên WebApp/Mobile App tối ưu hóa đa mục tiêu giữa thời gian và chỉ số rủi ro thính giác ($ARI$).
+* **Lợi thế vượt trội:** Bất kỳ người khiếm thính nào có smartphone cũng có thể cài đặt và sử dụng ngay lập tức với **chi phí phần cứng 0 VNĐ**.
 
-* **Khối lượng:** Cụm Pod trên ghi-đông: **$82\,\text{g}$**; Mỗi bên tay nắm rung: **$44\,\text{g}$**.
-* **Thời lượng pin tay nắm:** Đo đạc thực nghiệm đạt **$> 8.5$ giờ** hoạt động liên tục.
+### 5.2. Giai đoạn 2: Lộ trình Mở rộng Phần cứng Chuyên dụng (Hardware Extension Roadmap)
+> 💡 **Định vị:** Đây là **gói phụ kiện nâng cấp mở rộng tùy chọn (Hardware Add-on Kit)** dành cho giai đoạn thương mại hóa quy mô lớn, môi trường di chuyển tốc độ cao (>40 km/h), đường trường nhiều tạp âm gió phức tạp hoặc hợp tác tích hợp sẵn với các hãng sản xuất xe máy/xe điện (B2B/B2G). **Phần cứng này hoàn toàn không phải là điều kiện tiên quyết để chạy hệ thống phần mềm MVP.**
+
+Dự toán nghiên cứu khả thi công nghiệp (Industrial Feasibility Study) cho mẫu chế tạo phần cứng chuyên dụng:
+
+| Hạng mục Linh kiện | Thông số Kỹ thuật & Model | Đơn giá ước tính | Vai trò / Mục đích mở rộng |
+| :--- | :--- | :---: | :--- |
+| **Mảng 3x MEMS Micro** | Knowles SPH0645 / ST MP34DT01 (PDM/I2S, SNR 65dB) | ~120.000 VNĐ | Nâng độ nhạy DoA định hướng không gian 360° chính xác cao khi gió lớn |
+| **MCU Cụm Cảm biến Pod** | ESP32-S3 (Giải mã PDM/I2S + UAC2 USB OTG) | ~95.000 VNĐ | Tiền xử lý DSP lọc gió phần cứng trước khi gửi về điện thoại |
+| **Cảm biến Chuyển động** | IMU 6-trục MPU-6050 (I2C đo rung chấn ghi-đông) | ~35.000 VNĐ | Bù trừ sai số góc lái khi xe quay đầu hoặc vào cua nghiêng |
+| **2x MCU Tay nắm Rung** | nRF52840 / ESP32-C3 Mini (BLE 5.2 + Hardware WDT) | ~160.000 VNĐ | Phân tách xung rung Trái/Phải độc lập trực tiếp lên 2 bàn tay |
+| **2x Động cơ Rung & Driver**| Motor LRA Coin Motor + IC Driver TI DRV2605L | ~160.000 VNĐ | Xung xúc giác cao cấp, hỗ trợ kiểm tra tiếp xúc bàn tay qua Back-EMF |
+| **2x Gia tốc kế & Pin sạc** | Cảm biến LIS3DHTR + Pin LiPo 500mAh có mạch BMS | ~140.000 VNĐ | Cảm biến vòng kín đo rung thực tế và cấp nguồn độc lập >8.5 giờ |
+| **Phụ kiện, Cáp & Vỏ IP65** | Cáp Type-C ren vặn, mút chắn gió, kẹp nhôm CNC | ~240.000 VNĐ | Vỏ bảo vệ chống nước IP65 chịu mưa nắng khắc nghiệt tại Việt Nam |
+| **DỰ TOÁN LINH KIỆN LÕI** | *(Các module điện tử rời)* | **~950.000 VNĐ** | *Chi phí linh kiện điện tử cơ bản* |
+| **TỔNG DỰ TOÁN HOÀN THIỆN** | **Gồm gia công 3 mạch PCB 2 lớp, vỏ PETG & lắp ráp** | **~1.550.000 VNĐ** | *Dành cho giai đoạn thương mại hóa / sản xuất quy mô* |
 
 ---
 

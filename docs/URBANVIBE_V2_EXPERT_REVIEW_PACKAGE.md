@@ -93,10 +93,14 @@ Người dùng tự tay bấm chọn và xác nhận lộ trình trước khi xu
   - **Tay nắm rung:** Pin sạc **LiPo 500mAh** riêng cho từng tay nắm, tích hợp IC quản lý sạc/xả BMS, thời gian hoạt động thực tế đo đạc đạt $>8.5$ giờ.
 * **Độ bền cáp & Cơ khí:** Đầu cắm USB-C chuẩn **Screw-lock ren vặn** bọc đệm O-ring chống tuột cáp; bọc giảm căng dây (Strain Relief); gá lắp chìm sát ghi-đông, bo tròn an toàn khi xảy ra va chạm.
 
-### 3.3. Bảng BOM (Bill of Materials) & Rủi Ro Kỹ Thuật Cần Chứng Minh Đầu Tiên
+### 3.3. Lộ Trình Mở Rộng Phần Cứng Chuyên Dụng (BOM Feasibility) & Rủi Ro Kỹ Thuật Tiên Quyết
 
-> ⚠️ **RỦI RO KỸ THUẬT TIÊN QUYẾT (HIGHEST-PRIORITY TECHNICAL SPIKE):**  
-> Nhóm xác định việc thu nhận PCM đa kênh đồng bộ từ mảng 3 micro PDM/I2S trên vi điều khiển ESP32-S3, truyền ổn định qua giao thức USB Audio Class 2.0 (UAC2) và nhận dữ liệu mượt mà, không rớt khung trên thiết bị Android mục tiêu là **hạng mục kỹ thuật cần làm thực nghiệm chứng minh đầu tiên (First Proof-of-Feasibility Spike)** trước khi triển khai các phần khác.
+> 📌 **CHIẾN LƯỢC TRIỂN KHAI PHẦN CỨNG 2 GIAI ĐOẠN:**  
+> 1. **Giai đoạn 1 (Software-First MVP - 0 VNĐ Phần Cứng):** Tập trung 100% nguồn lực hoàn thiện Decision Intelligence Engine và AI On-device. Hệ thống hoạt động độc lập trên smartphone người dùng: thu âm qua microphone tích hợp, phản hồi xúc giác qua Web Vibration API / Native Haptics của điện thoại (kẹp trên ghi-đông). Người khiếm thính có thể sử dụng ngay mà không chịu bất kỳ rào cản chi phí mua sắm nào.  
+> 2. **Giai đoạn 2 (Hardware Add-on Kit - Mở rộng Chuyên dụng):** Bảng BOM dưới đây là nghiên cứu khả thi công nghiệp (Feasibility Study) cho mẫu phụ kiện chuyên dụng nhằm nâng độ nhạy DoA và tách bạch phản hồi 2 tay lái khi thương mại hóa hoặc tích hợp cho đội xe máy điện thông minh (B2B/B2G). Đây **không phải là điều kiện tiên quyết** để chạy phần mềm MVP.
+
+> ⚠️ **RỦI RO KỸ THUẬT TIÊN QUYẾT CHO PHA PHẦN CỨNG (HARDWARE TECHNICAL SPIKE):**  
+> Khi bước sang Giai đoạn 2 chế tạo phần cứng, việc thu nhận PCM đa kênh đồng bộ từ mảng 3 micro PDM/I2S trên vi điều khiển ESP32-S3, truyền ổn định qua giao thức USB Audio Class 2.0 (UAC2) và nhận dữ liệu mượt mà trên thiết bị Android mục tiêu là **hạng mục kỹ thuật cần làm thực nghiệm chứng minh đầu tiên (First Proof-of-Feasibility Spike)** trước khi triển khai sản xuất hàng loạt.
 
 | Phân loại | Linh kiện / Hạng mục Chế tạo | Thông số Kỹ thuật & Ghi chú | Đơn giá ước tính |
 | :--- | :--- | :--- | :---: |
@@ -114,7 +118,7 @@ Người dùng tự tay bấm chọn và xác nhận lộ trình trước khi xu
 | **Gia công & Lắp ráp** | 3x Bo mạch PCB 2 lớp | Gia công PCB FR4 (1 mạch Pod + 2 mạch Tay nắm có IC sạc BMS, LDO) | ~250.000 VNĐ |
 | **Gia công & Lắp ráp** | Vỏ in 3D nhựa PETG IP65 | Vỏ cụm Pod và vỏ tay nắm in 3D bề mặt chống nước, ron cao su O-ring | ~150.000 VNĐ |
 | **Gia công & Lắp ráp** | Vật tư phụ & Công lắp ráp | Chì hàn, keo chống nước Conformal Coating, fixture kiểm thử | ~200.000 VNĐ |
-| *(Tổng kết)* | **TỔNG CHI PHÍ CHẾ TẠO MẪU PROTOTYPE HOÀN CHỈNH** | **Trọn bộ cụm Pod + 2 Tay nắm rung (Khối lượng Pod: 82g, Tay nắm: 44g)** | **~1.550.000 VNĐ** |
+| *(Tổng kết)* | **TỔNG CHI PHÍ DỰ TOÁN HOÀN CHỈNH CHO GIAI ĐOẠN 2** | **Trọn bộ cụm Pod + 2 Tay nắm rung (Khối lượng Pod: 82g, Tay nắm: 44g)** | **~1.550.000 VNĐ** |
 
 * **Danh mục Smartphone Android Đang Thử nghiệm Tương thích (Targeted HCL):**
   - *Đã kiểm tra kết nối UAC2 và NDK AAudio đa kênh sơ bộ:* Samsung Galaxy S23 (OneUI 6), Samsung Galaxy A54, Google Pixel 7 (Android 14).
