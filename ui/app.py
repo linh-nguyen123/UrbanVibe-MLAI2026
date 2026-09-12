@@ -8,6 +8,7 @@ MLAI Hackathon 2026 - Decision Intelligence Challenge (TMA Solutions)
 - Tab 2: 🚨 Giám Sát An Toàn Trên Xe (On-Trip HUD - Chế Độ Lái Xe Toàn Màn Hình Tối Giản)
 """
 
+import os
 import sys
 from pathlib import Path
 
