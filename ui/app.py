@@ -73,6 +73,77 @@ if "data_opt_in" not in st.session_state:
 
 
 # ============================================================================
+# DANH MỤC ĐỊA ĐIỂM HIỆU CHUẨN GPS & GỢI Ý THÔNG MINH (RECOMMENDATION SYSTEM)
+# ============================================================================
+
+CALIBRATED_LOCATIONS = {
+    "ĐH Bách Khoa CS1 (Quận 10)": {
+        "coords": [106.6578, 10.7725],
+        "category": "🎓 Trường học",
+        "address": "268 Lý Thường Kiệt, P.14, Q.10"
+    },
+    "Bến xe Miền Đông Mới (TP. Thủ Đức)": {
+        "coords": [106.7905, 10.8522],
+        "category": "🚌 Bến xe liên tỉnh",
+        "address": "501 Hoàng Hữu Nam, P. Long Bình, TP. Thủ Đức"
+    },
+    "ĐH Bách Khoa CS2 (Khu ĐHQG TP.HCM)": {
+        "coords": [106.8055, 10.8805],
+        "category": "🎓 Ký túc xá / Giảng đường",
+        "address": "Khu đô thị ĐHQG-HCM, TP. Dĩ An / Thủ Đức"
+    },
+    "Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)": {
+        "coords": [106.6602, 10.8185],
+        "category": "✈️ Cảng hàng không",
+        "address": "Đường Trường Sơn, P.2, Q. Tân Bình"
+    },
+    "Chợ Bến Thành (Quận 1)": {
+        "coords": [106.6983, 10.7726],
+        "category": "🛍️ Thương mại & Du lịch",
+        "address": "Đường Lê Lợi, P. Bến Thành, Q.1"
+    },
+    "Bệnh viện Chợ Rẫy (Quận 5)": {
+        "coords": [106.6593, 10.7554],
+        "category": "🏥 Y tế khẩn cấp",
+        "address": "201B Nguyễn Chí Thanh, P.12, Q.5"
+    },
+    "Khu Công nghệ cao (SHTP - TP. Thủ Đức)": {
+        "coords": [106.7915, 10.8550],
+        "category": "💼 Khu công nghệ cao",
+        "address": "Xa lộ Hà Nội, P. Hiệp Phú, TP. Thủ Đức"
+    },
+    "Bến xe Miền Tây (Bình Tân)": {
+        "coords": [106.6133, 10.7410],
+        "category": "🚌 Bến xe liên tỉnh",
+        "address": "395 Kinh Dương Vương, P. An Lạc, Q. Bình Tân"
+    },
+    "Landmark 81 / Vinhomes Central Park": {
+        "coords": [106.7218, 10.7950],
+        "category": "🏙️ Đô thị trung tâm",
+        "address": "720A Điện Biên Phủ, P.22, Q. Bình Thạnh"
+    }
+}
+
+POPULAR_OD_RECOMMENDATIONS = {
+    "⭐ [Tuyến Sinh Viên] ĐH Bách Khoa CS1 ➔ Bến xe Miền Đông Mới": (
+        "ĐH Bách Khoa CS1 (Quận 10)", "Bến xe Miền Đông Mới (TP. Thủ Đức)"
+    ),
+    "🎓 [Tuyến Ký Túc Xá] ĐH Bách Khoa CS1 ➔ ĐH Bách Khoa CS2 (Khu ĐHQG TP.HCM)": (
+        "ĐH Bách Khoa CS1 (Quận 10)", "ĐH Bách Khoa CS2 (Khu ĐHQG TP.HCM)"
+    ),
+    "✈️ [Tuyến Sân Bay] Chợ Bến Thành (Quận 1) ➔ Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)": (
+        "Chợ Bến Thành (Quận 1)", "Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)"
+    ),
+    "🏥 [Tuyến Y Tế Khẩn] Bến xe Miền Tây (Bình Tân) ➔ Bệnh viện Chợ Rẫy (Quận 5)": (
+        "Bến xe Miền Tây (Bình Tân)", "Bệnh viện Chợ Rẫy (Quận 5)"
+    ),
+    "💼 [Tuyến Công Sở] ĐH Bách Khoa CS1 (Quận 10) ➔ Khu Công nghệ cao (SHTP - TP. Thủ Đức)": (
+        "ĐH Bách Khoa CS1 (Quận 10)", "Khu Công nghệ cao (SHTP - TP. Thủ Đức)"
+    )
+}
+
+
+# ============================================================================
 # CALLBACKS XỬ LÝ SỰ KIỆN MÔ PHỎNG TỨC THÌ (<50ms, KHÔNG TRỄ REFRESS)
 # ============================================================================
 
@@ -370,12 +441,61 @@ else:
     # TAB 1: PRE-TRIP DECISION INTELLIGENCE
     # ------------------------------------------------------------------------
     with tab_pre_trip:
-        st.markdown("#### 1. Thiết lập Hành trình & Hồ sơ Sở thích")
+        st.markdown("#### 1. Thiết Lập Hành Trình & Gợi Ý Thông Minh (Location Recommender)")
+        st.caption("Chọn nhanh các cặp lộ trình mẫu đã hiệu chuẩn tọa độ GPS hoặc chọn địa điểm từ danh mục chuẩn hóa để đảm bảo độ chính xác định vị:")
+
+        # 1. Thanh Gợi Ý Tuyến Phổ Biến (Recommender System)
+        rec_keys = list(POPULAR_OD_RECOMMENDATIONS.keys())
+        rec_options = ["-- Chọn Gợi Ý Lộ Trình Mẫu (1 Click Tự Động Thiết Lập) --"] + rec_keys
+
+        def on_select_preset_route():
+            chosen = st.session_state.get("quick_preset_choice", "")
+            if chosen in POPULAR_OD_RECOMMENDATIONS:
+                o, d = POPULAR_OD_RECOMMENDATIONS[chosen]
+                st.session_state.origin = o
+                st.session_state.destination = d
+
+        st.selectbox(
+            "💡 Gợi ý lộ trình thường đi:",
+            options=rec_options,
+            key="quick_preset_choice",
+            on_change=on_select_preset_route
+        )
+
         col_in1, col_in2, col_in3 = st.columns([2, 2, 2])
+        loc_names = list(CALIBRATED_LOCATIONS.keys())
+        
+        orig_idx = loc_names.index(st.session_state.origin) if st.session_state.origin in loc_names else 0
+        dest_idx = loc_names.index(st.session_state.destination) if st.session_state.destination in loc_names else 1
+
         with col_in1:
-            st.session_state.origin = st.text_input("Điểm xuất phát:", value=st.session_state.origin)
+            st.session_state.origin = st.selectbox(
+                "Điểm xuất phát (Origin):",
+                options=loc_names,
+                index=orig_idx
+            )
+            orig_meta = CALIBRATED_LOCATIONS.get(st.session_state.origin, {})
+            st.markdown(
+                f"<div style='font-size: 11px; color: #a7f3d0; background: #064e3b; padding: 4px 8px; border-radius: 6px; margin-top: -6px;'>"
+                f"📍 <b>GPS:</b> {orig_meta.get('coords')} · <i>{orig_meta.get('address')}</i>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+
         with col_in2:
-            st.session_state.destination = st.text_input("Điểm đến:", value=st.session_state.destination)
+            st.session_state.destination = st.selectbox(
+                "Điểm đến (Destination):",
+                options=loc_names,
+                index=dest_idx
+            )
+            dest_meta = CALIBRATED_LOCATIONS.get(st.session_state.destination, {})
+            st.markdown(
+                f"<div style='font-size: 11px; color: #fecaca; background: #450a0a; padding: 4px 8px; border-radius: 6px; margin-top: -6px;'>"
+                f"🏁 <b>GPS:</b> {dest_meta.get('coords')} · <i>{dest_meta.get('address')}</i>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
+
         with col_in3:
             presets = UserPreferenceProfile.get_presets()
             preset_keys = list(presets.keys())
@@ -387,6 +507,9 @@ else:
             )
             st.session_state.profile_key = selected_key
             active_profile = presets[selected_key]
+
+        if st.session_state.origin == st.session_state.destination:
+            st.warning("⚠️ Điểm xuất phát và Điểm đến đang trùng nhau. Vui lòng chọn 2 địa điểm khác nhau!")
 
         st.caption(
             f"Vector trọng số: Thời gian $w_t = {active_profile.w_time:.2f}$ | "
@@ -500,12 +623,32 @@ else:
                 pickable=False
             )
 
+            # Lớp ghim điểm xuất phát và đích đến theo tọa độ GPS hiệu chuẩn
+            orig_pos = CALIBRATED_LOCATIONS.get(st.session_state.origin, {}).get("coords", [106.6578, 10.7725])
+            dest_pos = CALIBRATED_LOCATIONS.get(st.session_state.destination, {}).get("coords", [106.7905, 10.8522])
+
+            od_pins = [
+                {"name": f"Điểm xuất phát: {st.session_state.origin}", "coordinates": orig_pos, "color": [16, 185, 129, 255], "desc": "Điểm bắt đầu hành trình"},
+                {"name": f"Điểm đến: {st.session_state.destination}", "coordinates": dest_pos, "color": [239, 68, 68, 255], "desc": "Điểm kết thúc hành trình"}
+            ]
+
+            pin_layer = pdk.Layer(
+                "ScatterplotLayer",
+                od_pins,
+                get_position="coordinates",
+                get_color="color",
+                get_radius=450,
+                radius_min_pixels=11,
+                radius_max_pixels=24,
+                pickable=True
+            )
+
             view_state = pdk.ViewState(latitude=10.812, longitude=106.723, zoom=11.2, pitch=0)
             deck = pdk.Deck(
-                layers=[path_layer, hotspot_layer, text_layer],
+                layers=[path_layer, hotspot_layer, pin_layer, text_layer],
                 initial_view_state=view_state,
                 map_style="dark",
-                tooltip={"text": "{name}\n{desc}{reason}"}
+                tooltip={"text": "{name}\n{desc}"}
             )
             st.pydeck_chart(deck, use_container_width=True)
 
