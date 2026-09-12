@@ -76,71 +76,262 @@ if "data_opt_in" not in st.session_state:
 # DANH MỤC ĐỊA ĐIỂM HIỆU CHUẨN GPS & GỢI Ý THÔNG MINH (RECOMMENDATION SYSTEM)
 # ============================================================================
 
+import math
+import re
+from typing import Dict, List, Tuple
+
 CALIBRATED_LOCATIONS = {
+    "ĐH Sư phạm Kỹ thuật TP.HCM (HCMUTE / ĐH SPKT - TP. Thủ Đức)": {
+        "coords": [106.7722, 10.8507],
+        "category": "🎓 Trường Đại học Trọng điểm",
+        "address": "1 Võ Văn Ngân, P. Linh Chiểu, TP. Thủ Đức",
+        "aliases": ["spkt", "đh spkt", "dh spkt", "dh spkt tp hcm", "spkt tp hcm", "hcmute", "su pham ky thuat", "thu duc"]
+    },
     "ĐH Bách Khoa CS1 (Quận 10)": {
         "coords": [106.6578, 10.7725],
-        "category": "🎓 Trường học",
-        "address": "268 Lý Thường Kiệt, P.14, Q.10"
+        "category": "🎓 Trường Đại học Trọng điểm",
+        "address": "268 Lý Thường Kiệt, P.14, Q.10",
+        "aliases": ["bk", "bach khoa", "dh bk", "dh bk cs1", "ly thuong kiet", "quan 10"]
     },
     "Bến xe Miền Đông Mới (TP. Thủ Đức)": {
         "coords": [106.7905, 10.8522],
         "category": "🚌 Bến xe liên tỉnh",
-        "address": "501 Hoàng Hữu Nam, P. Long Bình, TP. Thủ Đức"
+        "address": "501 Hoàng Hữu Nam, P. Long Bình, TP. Thủ Đức",
+        "aliases": ["bx mien dong moi", "mien dong moi", "hoang huu nam", "bx mien dong"]
     },
     "ĐH Bách Khoa CS2 (Khu ĐHQG TP.HCM)": {
         "coords": [106.8055, 10.8805],
         "category": "🎓 Ký túc xá / Giảng đường",
-        "address": "Khu đô thị ĐHQG-HCM, TP. Dĩ An / Thủ Đức"
+        "address": "Khu đô thị ĐHQG-HCM, TP. Dĩ An / Thủ Đức",
+        "aliases": ["bk cs2", "dh bk cs2", "lang dai hoc", "dhqg", "ky tuc xa"]
+    },
+    "ĐH Khoa học Tự nhiên CS1 (ĐHQG-HCM - Quận 5)": {
+        "coords": [106.6826, 10.7628],
+        "category": "🎓 Trường Đại học Trọng điểm",
+        "address": "227 Nguyễn Văn Cừ, P.4, Q.5",
+        "aliases": ["khtn", "dh khtn", "tu nhien", "nguyen van cu", "quan 5"]
+    },
+    "ĐH Kinh tế TP.HCM (UEH - Cơ sở A Quận 3)": {
+        "coords": [106.6953, 10.7828],
+        "category": "🎓 Trường Đại học Trọng điểm",
+        "address": "59C Nguyễn Đình Chiểu, P. Võ Thị Sáu, Q.3",
+        "aliases": ["ueh", "dh ueh", "kinh te", "nguyen dinh chieu", "quan 3"]
+    },
+    "ĐH Công nghệ Thông tin (UIT - ĐHQG-HCM)": {
+        "coords": [106.8031, 10.8700],
+        "category": "🎓 Ký túc xá / Giảng đường",
+        "address": "Khu phố 6, P. Linh Trung, TP. Thủ Đức",
+        "aliases": ["uit", "dh uit", "cntt", "linh trung", "dhqg"]
+    },
+    "ĐH Sài Gòn (SGU - Cơ sở chính Quận 5)": {
+        "coords": [106.6800, 10.7597],
+        "category": "🎓 Trường Đại học",
+        "address": "273 An Dương Vương, P.3, Q.5",
+        "aliases": ["sgu", "dh sai gon", "sai gon", "an duong vuong"]
     },
     "Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)": {
         "coords": [106.6602, 10.8185],
         "category": "✈️ Cảng hàng không",
-        "address": "Đường Trường Sơn, P.2, Q. Tân Bình"
+        "address": "Đường Trường Sơn, P.2, Q. Tân Bình",
+        "aliases": ["san bay", "tan son nhat", "tsn", "truong son", "tan binh"]
     },
     "Chợ Bến Thành (Quận 1)": {
         "coords": [106.6983, 10.7726],
         "category": "🛍️ Thương mại & Du lịch",
-        "address": "Đường Lê Lợi, P. Bến Thành, Q.1"
+        "address": "Đường Lê Lợi, P. Bến Thành, Q.1",
+        "aliases": ["ben thanh", "cho ben thanh", "quan 1", "le loi"]
     },
     "Bệnh viện Chợ Rẫy (Quận 5)": {
         "coords": [106.6593, 10.7554],
         "category": "🏥 Y tế khẩn cấp",
-        "address": "201B Nguyễn Chí Thanh, P.12, Q.5"
+        "address": "201B Nguyễn Chí Thanh, P.12, Q.5",
+        "aliases": ["cho ray", "bv cho ray", "benh vien", "nguyen chi thanh"]
     },
     "Khu Công nghệ cao (SHTP - TP. Thủ Đức)": {
         "coords": [106.7915, 10.8550],
         "category": "💼 Khu công nghệ cao",
-        "address": "Xa lộ Hà Nội, P. Hiệp Phú, TP. Thủ Đức"
+        "address": "Xa lộ Hà Nội, P. Hiệp Phú, TP. Thủ Đức",
+        "aliases": ["shtp", "cong nghe cao", "khu cong nghe cao", "xa lo ha noi"]
+    },
+    "Ngã 4 Thủ Đức (Trục Xa lộ Hà Nội - Lê Văn Việt)": {
+        "coords": [106.7709, 10.8475],
+        "category": "🚦 Nút giao trọng điểm",
+        "address": "Xa lộ Hà Nội, P. Hiệp Phú, TP. Thủ Đức",
+        "aliases": ["nga 4 thu duc", "nga tu thu duc", "le van viet"]
     },
     "Bến xe Miền Tây (Bình Tân)": {
         "coords": [106.6133, 10.7410],
         "category": "🚌 Bến xe liên tỉnh",
-        "address": "395 Kinh Dương Vương, P. An Lạc, Q. Bình Tân"
+        "address": "395 Kinh Dương Vương, P. An Lạc, Q. Bình Tân",
+        "aliases": ["bx mien tay", "mien tay", "kinh duong vuong", "binh tan"]
     },
-    "Landmark 81 / Vinhomes Central Park": {
+    "Bến xe An Sương (Quận 12 / Hóc Môn)": {
+        "coords": [106.6111, 10.8447],
+        "category": "🚌 Bến xe liên tỉnh",
+        "address": "Quốc Lộ 22, X. Bà Điểm, H. Hóc Môn",
+        "aliases": ["bx an suong", "an suong", "quoc lo 22", "hoc mon", "quan 12"]
+    },
+    "Landmark 81 / Vinhomes Central Park (Bình Thạnh)": {
         "coords": [106.7218, 10.7950],
         "category": "🏙️ Đô thị trung tâm",
-        "address": "720A Điện Biên Phủ, P.22, Q. Bình Thạnh"
+        "address": "720A Điện Biên Phủ, P.22, Q. Bình Thạnh",
+        "aliases": ["landmark 81", "landmark", "vinhomes", "binh thanh", "dien bien phu"]
     }
 }
 
 POPULAR_OD_RECOMMENDATIONS = {
-    "⭐ [Tuyến Sinh Viên] ĐH Bách Khoa CS1 ➔ Bến xe Miền Đông Mới": (
+    "⭐ [Tuyến Sinh Viên Đột Phá] ĐH Bách Khoa CS1 ➔ ĐH Sư phạm Kỹ thuật (HCMUTE)": (
+        "ĐH Bách Khoa CS1 (Quận 10)", "ĐH Sư phạm Kỹ thuật TP.HCM (HCMUTE / ĐH SPKT - TP. Thủ Đức)"
+    ),
+    "🎓 [Tuyến Kỹ Thuật Liên Trường] ĐH Sư phạm Kỹ thuật (HCMUTE) ➔ ĐH Bách Khoa CS2 (Khu ĐHQG TP.HCM)": (
+        "ĐH Sư phạm Kỹ thuật TP.HCM (HCMUTE / ĐH SPKT - TP. Thủ Đức)", "ĐH Bách Khoa CS2 (Khu ĐHQG TP.HCM)"
+    ),
+    "💼 [Tuyến Công Nghệ Thủ Đức] ĐH Sư phạm Kỹ thuật (HCMUTE) ➔ Khu Công nghệ cao (SHTP - TP. Thủ Đức)": (
+        "ĐH Sư phạm Kỹ thuật TP.HCM (HCMUTE / ĐH SPKT - TP. Thủ Đức)", "Khu Công nghệ cao (SHTP - TP. Thủ Đức)"
+    ),
+    "✈️ [Tuyến Xuyên Tâm] ĐH Sư phạm Kỹ thuật (HCMUTE) ➔ Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)": (
+        "ĐH Sư phạm Kỹ thuật TP.HCM (HCMUTE / ĐH SPKT - TP. Thủ Đức)", "Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)"
+    ),
+    "🚌 [Tuyến Bến Xe Mới] ĐH Bách Khoa CS1 ➔ Bến xe Miền Đông Mới (TP. Thủ Đức)": (
         "ĐH Bách Khoa CS1 (Quận 10)", "Bến xe Miền Đông Mới (TP. Thủ Đức)"
-    ),
-    "🎓 [Tuyến Ký Túc Xá] ĐH Bách Khoa CS1 ➔ ĐH Bách Khoa CS2 (Khu ĐHQG TP.HCM)": (
-        "ĐH Bách Khoa CS1 (Quận 10)", "ĐH Bách Khoa CS2 (Khu ĐHQG TP.HCM)"
-    ),
-    "✈️ [Tuyến Sân Bay] Chợ Bến Thành (Quận 1) ➔ Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)": (
-        "Chợ Bến Thành (Quận 1)", "Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)"
     ),
     "🏥 [Tuyến Y Tế Khẩn] Bến xe Miền Tây (Bình Tân) ➔ Bệnh viện Chợ Rẫy (Quận 5)": (
         "Bến xe Miền Tây (Bình Tân)", "Bệnh viện Chợ Rẫy (Quận 5)"
     ),
-    "💼 [Tuyến Công Sở] ĐH Bách Khoa CS1 (Quận 10) ➔ Khu Công nghệ cao (SHTP - TP. Thủ Đức)": (
-        "ĐH Bách Khoa CS1 (Quận 10)", "Khu Công nghệ cao (SHTP - TP. Thủ Đức)"
+    "🛍️ [Tuyến Trung Tâm] Chợ Bến Thành (Quận 1) ➔ Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)": (
+        "Chợ Bến Thành (Quận 1)", "Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)"
     )
 }
+
+
+def normalize_vietnamese(text: str) -> str:
+    """Loại bỏ dấu tiếng Việt và chuẩn hóa chữ thường để tìm kiếm linh hoạt."""
+    text = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', text, flags=re.I)
+    text = re.sub(r'[èéẹẻẽêềếệểễ]', 'e', text, flags=re.I)
+    text = re.sub(r'[ìíịỉĩ]', 'i', text, flags=re.I)
+    text = re.sub(r'[òóọỏõôồốộổỗơờớợởỡ]', 'o', text, flags=re.I)
+    text = re.sub(r'[ùúụủũưừứựửữ]', 'u', text, flags=re.I)
+    text = re.sub(r'[ỳýỵỷỹ]', 'y', text, flags=re.I)
+    text = re.sub(r'[đĐ]', 'd', text, flags=re.I)
+    return text.lower().strip()
+
+
+def search_calibrated_locations(query: str, locations_dict: Dict) -> List[str]:
+    """Tìm kiếm vị trí gần đúng hoặc từ khóa viết tắt trong danh mục chuẩn."""
+    if not query:
+        return []
+    norm_q = normalize_vietnamese(query)
+    tokens = [t for t in norm_q.split() if t]
+    matched = []
+    for name, meta in locations_dict.items():
+        norm_name = normalize_vietnamese(name)
+        norm_addr = normalize_vietnamese(meta.get("address", ""))
+        norm_cat = normalize_vietnamese(meta.get("category", ""))
+        aliases_str = " ".join([normalize_vietnamese(a) for a in meta.get("aliases", [])])
+        combined = f"{norm_name} {norm_addr} {norm_cat} {aliases_str}"
+        
+        # Khớp toàn bộ cụm hoặc tất cả từ khóa tìm kiếm
+        if norm_q in combined or all(t in combined for t in tokens):
+            matched.append(name)
+    return matched
+
+
+def generate_dynamic_route_geometries(
+    start_coords: List[float],
+    end_coords: List[float]
+) -> Tuple[List[List[float]], List[List[float]], List[List[float]], List[Dict], List[Dict], Tuple[float, float, float]]:
+    """
+    Sinh hình học động kết nối chính xác start_coords [lon, lat] và end_coords [lon, lat] cho 3 tuyến:
+    - Tuyến A: Trục chính trực tiếp (wobble vi mô đường phố)
+    - Tuyến B: SafeRoute (uốn cong né trục rủi ro âm thanh)
+    - Tuyến C: Đường gom vành đai phụ
+    Cùng các điểm rủi ro âm thanh (Hotspots), nhãn văn bản và tọa độ camera tự động.
+    """
+    lon1, lat1 = start_coords
+    lon2, lat2 = end_coords
+    dx = lon2 - lon1
+    dy = lat2 - lat1
+    dist_deg = math.hypot(dx, dy)
+
+    if dist_deg < 1e-4:
+        # Nếu hai điểm trùng nhau hoặc quá gần, tạo bán kính giả định 500m để vẽ trực quan
+        dist_deg = 0.012
+        dx, dy = 0.009, 0.007
+
+    # Unit normal vector (vuông góc với trục thẳng nối O-D)
+    nx = -dy / dist_deg
+    ny = dx / dist_deg
+
+    n_pts = 9
+    route_a_pts = []
+    route_b_pts = []
+    route_c_pts = []
+
+    for i in range(n_pts + 1):
+        t = i / float(n_pts)
+        
+        # Tuyến A (Baseline): Bám trục thẳng với dao động góc phố nhẹ
+        wobble = 0.032 * math.sin(t * math.pi * 3.0) * dist_deg
+        ax = lon1 + t * dx + wobble * nx
+        ay = lat1 + t * dy + wobble * ny
+        route_a_pts.append([round(ax, 5), round(ay, 5)])
+
+        # Tuyến B (SafeRoute): Vòng cung né trục chính (offset dương theo pháp tuyến)
+        arc_b = math.sin(t * math.pi) * 0.19 * dist_deg
+        bx = lon1 + t * dx + arc_b * nx
+        by = lat1 + t * dy + arc_b * ny
+        route_b_pts.append([round(bx, 5), round(by, 5)])
+
+        # Tuyến C (Vành đai vắng): Vòng cung đối xứng xa hơn (offset âm theo pháp tuyến)
+        arc_c = -math.sin(t * math.pi) * 0.29 * dist_deg
+        cx = lon1 + t * dx + arc_c * nx
+        cy = lat1 + t * dy + arc_c * ny
+        route_c_pts.append([round(cx, 5), round(cy, 5)])
+
+    # Đảm bảo điểm đầu và cuối khớp chính xác 100% với Origin và Destination
+    route_a_pts[0] = [lon1, lat1]
+    route_a_pts[-1] = [lon2, lat2]
+    route_b_pts[0] = [lon1, lat1]
+    route_b_pts[-1] = [lon2, lat2]
+    route_c_pts[0] = [lon1, lat1]
+    route_c_pts[-1] = [lon2, lat2]
+
+    # Điểm rủi ro âm thanh bố trí trên Tuyến A (giao lộ trục chính đông đúc)
+    hs1_coords = [round(lon1 + 0.36 * dx + 0.012 * dist_deg * nx, 5), round(lat1 + 0.36 * dy + 0.012 * dist_deg * ny, 5)]
+    hs2_coords = [round(lon1 + 0.72 * dx - 0.010 * dist_deg * nx, 5), round(lat1 + 0.72 * dy - 0.010 * dist_deg * ny, 5)]
+
+    hotspots = [
+        {
+            "name": "Điểm rủi ro âm thanh 1: Nút giao Trục chính",
+            "coordinates": hs1_coords,
+            "ari": "9.6 / 10",
+            "reason": "Mật độ xe tải nặng cao, còi hơi vượt 112 dBA liên tục"
+        },
+        {
+            "name": "Điểm rủi ro âm thanh 2: Giao lộ Vành đai đô thị",
+            "coordinates": hs2_coords,
+            "ari": "9.3 / 10",
+            "reason": "Khu vực xe container phanh gấp và áp sát làn xe máy"
+        }
+    ]
+
+    # Nhãn văn bản (TextLayer) gắn vào điểm giữa của từng tuyến
+    mid_idx = n_pts // 2
+    text_labels = [
+        {"text": "Tuyến A [Nhanh - Baseline]", "coordinates": route_a_pts[mid_idx], "color": [255, 255, 255, 230]},
+        {"text": "⭐ Tuyến B [SafeRoute - Đề xuất]", "coordinates": route_b_pts[mid_idx], "color": [52, 211, 153, 255]},
+        {"text": "Tuyến C [Vành đai vắng]", "coordinates": route_c_pts[mid_idx], "color": [186, 230, 253, 220]},
+        {"text": "⚠️ Điểm rủi ro trục chính", "coordinates": hs1_coords, "color": [248, 113, 113, 255]},
+        {"text": "⚠️ Điểm rủi ro giao lộ", "coordinates": hs2_coords, "color": [248, 113, 113, 255]}
+    ]
+
+    # Tính toán ViewState tâm và zoom tự thích ứng
+    mid_lat = (lat1 + lat2) / 2.0
+    mid_lon = (lon1 + lon2) / 2.0
+    span = max(abs(lat2 - lat1), abs(lon2 - lon1))
+    zoom = round(max(10.5, min(14.0, 13.2 - math.log2(max(span, 0.02) / 0.035))), 2)
+
+    return route_a_pts, route_b_pts, route_c_pts, hotspots, text_labels, (mid_lat, mid_lon, zoom)
 
 
 # ============================================================================
@@ -442,11 +633,44 @@ else:
     # ------------------------------------------------------------------------
     with tab_pre_trip:
         st.markdown("#### 1. Thiết Lập Hành Trình & Gợi Ý Thông Minh (Location Recommender)")
-        st.caption("Chọn nhanh các cặp lộ trình mẫu đã hiệu chuẩn tọa độ GPS hoặc chọn địa điểm từ danh mục chuẩn hóa để đảm bảo độ chính xác định vị:")
+        st.caption("Gõ từ khóa bất kỳ (viết tắt, không dấu) hoặc chọn từ danh mục chuẩn hóa để cập nhật lộ trình và bản đồ không gian đa lớp tức thì:")
 
-        # 1. Thanh Gợi Ý Tuyến Phổ Biến (Recommender System)
+        # 1. Bộ Tìm Kiếm Địa Điểm Thông Minh & Đề Xuất Nhanh (Recommender Search)
+        search_query = st.text_input(
+            "🔍 Tìm kiếm nhanh địa điểm (Hỗ trợ viết tắt / không dấu: 'spkt', 'đh spkt tp hcm', 'hcmute', 'bách khoa', 'sân bay', 'quận 10'...):",
+            placeholder="Gõ từ khóa tìm kiếm (Ví dụ: dh spkt tp hcm, hcmute, bk cs1, san bay, cho ray)...",
+            key="location_search_box"
+        )
+        if search_query:
+            matched_locs = search_calibrated_locations(search_query, CALIBRATED_LOCATIONS)
+            if matched_locs:
+                st.markdown(f"<div style='font-size: 13px; font-weight: bold; color: #38bdf8; margin-bottom: 6px;'>🎯 Gợi ý tìm kiếm ({len(matched_locs)} kết quả phù hợp):</div>", unsafe_allow_html=True)
+                for m_name in matched_locs[:3]:  # Top 3 kết quả phù hợp nhất
+                    m_meta = CALIBRATED_LOCATIONS[m_name]
+                    c_res1, c_res2, c_res3 = st.columns([5, 2, 2])
+                    with c_res1:
+                        st.markdown(
+                            f"<div style='background: #1e293b; padding: 6px 12px; border-radius: 6px; border-left: 3px solid #10b981;'>"
+                            f"📍 <b>{m_name}</b><br/>"
+                            f"<span style='font-size: 12px; color: #94a3b8;'>{m_meta.get('category')} · {m_meta.get('address')}</span>"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
+                    with c_res2:
+                        if st.button("👉 Đặt làm Điểm đi", key=f"set_orig_{m_name}", use_container_width=True):
+                            st.session_state.origin = m_name
+                            st.rerun()
+                    with c_res3:
+                        if st.button("👉 Đặt làm Điểm đến", key=f"set_dest_{m_name}", use_container_width=True):
+                            st.session_state.destination = m_name
+                            st.rerun()
+                st.markdown("<hr style='margin: 10px 0; border-color: rgba(255,255,255,0.1);'/>", unsafe_allow_html=True)
+            else:
+                st.info(f"Không tìm thấy vị trí khớp với '{search_query}'. Mời bạn chọn trực tiếp từ danh sách bên dưới.")
+
+        # 2. Thanh Gợi Ý Tuyến Phổ Biến (Recommender System Presets)
         rec_keys = list(POPULAR_OD_RECOMMENDATIONS.keys())
-        rec_options = ["-- Chọn Gợi Ý Lộ Trình Mẫu (1 Click Tự Động Thiết Lập) --"] + rec_keys
+        rec_options = ["-- Chọn Tuyến Mẫu Đề Xuất (1-Click Tự Động Thiết Lập) --"] + rec_keys
 
         def on_select_preset_route():
             chosen = st.session_state.get("quick_preset_choice", "")
@@ -456,7 +680,7 @@ else:
                 st.session_state.destination = d
 
         st.selectbox(
-            "💡 Gợi ý lộ trình thường đi:",
+            "💡 Tuyến đường trọng điểm mẫu:",
             options=rec_options,
             key="quick_preset_choice",
             on_change=on_select_preset_route
@@ -509,7 +733,7 @@ else:
             active_profile = presets[selected_key]
 
         if st.session_state.origin == st.session_state.destination:
-            st.warning("⚠️ Điểm xuất phát và Điểm đến đang trùng nhau. Vui lòng chọn 2 địa điểm khác nhau!")
+            st.warning("⚠️ Điểm xuất phát và Điểm đến đang trùng nhau. Vui lòng chọn 2 địa điểm khác nhau để hệ thống mô phỏng đa tuyến!")
 
         st.caption(
             f"Vector trọng số: Thời gian $w_t = {active_profile.w_time:.2f}$ | "
@@ -518,10 +742,15 @@ else:
             f"(Ràng buộc an toàn cứng: $ARI_{{max}} \\le {active_profile.tau_cutoff:.1f}$)"
         )
 
+        orig_pos = CALIBRATED_LOCATIONS.get(st.session_state.origin, {}).get("coords", [106.6578, 10.7725])
+        dest_pos = CALIBRATED_LOCATIONS.get(st.session_state.destination, {}).get("coords", [106.7722, 10.8507])
+
         decision_resp = generate_mock_decision_response(
             origin=st.session_state.origin,
             destination=st.session_state.destination,
-            profile=active_profile
+            profile=active_profile,
+            orig_coords=orig_pos,
+            dest_coords=dest_pos
         )
 
         st.markdown("---")
@@ -529,65 +758,36 @@ else:
 
         with col_map:
             st.markdown("#### Bản Đồ Không Gian Đa Lớp & Điểm Rủi Ro Âm Thanh")
-            st.caption("Phân biệt các tuyến bằng độ dày, kiểu nét và nhãn văn bản (không phụ thuộc màu sắc).")
+            st.caption("Tự động vẽ đường nối trực quan theo tọa độ GPS đã chọn; phân biệt các tuyến bằng độ dày nét và nhãn văn bản:")
 
-            # 3 Tuyến đường: Tuyến B được highlight nét dày nhất (8px)
+            # Tính toán hình học động nối từ Origin đến Destination
+            route_a_pts, route_b_pts, route_c_pts, hotspots_data, text_labels, (cam_lat, cam_lon, cam_zoom) = generate_dynamic_route_geometries(
+                orig_pos, dest_pos
+            )
+
+            # 3 Tuyến đường động: Tuyến B (SafeRoute) được highlight nét dày nhất (9px)
             routes_data = [
                 {
                     "name": "Tuyến A (Nhanh nhất - Baseline)",
-                    "path": [
-                        [106.657, 10.772], [106.675, 10.782], [106.698, 10.792],
-                        [106.715, 10.801], [106.745, 10.825], [106.770, 10.842], [106.790, 10.852]
-                    ],
+                    "path": route_a_pts,
                     "color": [239, 68, 68, 220],
                     "width": 5,
-                    "desc": "Tuyến A: Trục chính Điện Biên Phủ - Xa lộ Hà Nội (Nhiều xe tải, ARI 8.4)"
+                    "desc": f"Tuyến A: Trục giao thông chính (Nhiều xe tải, ARI 8.4) - {decision_resp.scenarios[0].duration_min:.0f} phút, {decision_resp.scenarios[0].distance_km:.1f} km"
                 },
                 {
                     "name": "Tuyến B: SafeRoute (Đề xuất tối ưu)",
-                    "path": [
-                        [106.657, 10.772], [106.662, 10.785], [106.680, 10.798],
-                        [106.702, 10.808], [106.728, 10.820], [106.755, 10.835], [106.778, 10.846], [106.790, 10.852]
-                    ],
+                    "path": route_b_pts,
                     "color": [16, 185, 129, 255],
-                    "width": 9,  # Nét dày nổi bật
-                    "desc": "Tuyến B: SafeRoute né điểm đen qua đường gom Song Hành (Giảm 77% rủi ro, ARI 1.9)"
+                    "width": 9,  # Nét dày nổi bật nhất
+                    "desc": f"Tuyến B: SafeRoute né điểm rủi ro qua phố nhánh an toàn (Giảm 77% rủi ro, ARI 1.9) - {decision_resp.scenarios[1].duration_min:.0f} phút, {decision_resp.scenarios[1].distance_km:.1f} km"
                 },
                 {
-                    "name": "Tuyến C (Đường gom vắng)",
-                    "path": [
-                        [106.657, 10.772], [106.645, 10.795], [106.660, 10.825],
-                        [106.705, 10.850], [106.745, 10.865], [106.775, 10.860], [106.790, 10.852]
-                    ],
+                    "name": "Tuyến C (Vành đai vắng)",
+                    "path": route_c_pts,
                     "color": [56, 189, 248, 180],
                     "width": 3,
-                    "desc": "Tuyến C: Vành đai vắng qua Phạm Văn Đồng (Tốn thêm 15 phút, độ bất định cao)"
+                    "desc": f"Tuyến C: Vành đai đô thị thoáng (Độ ồn cực thấp, độ bất định cao) - {decision_resp.scenarios[2].duration_min:.0f} phút, {decision_resp.scenarios[2].distance_km:.1f} km"
                 }
-            ]
-
-            # Điểm rủi ro âm thanh (Hotspots) - Đổi từ "điểm đen tai nạn" sang "điểm rủi ro âm thanh"
-            hotspots_data = [
-                {
-                    "name": "Điểm rủi ro âm thanh: Nút giao Hàng Xanh / Cầu Sài Gòn",
-                    "coordinates": [106.715, 10.801],
-                    "ari": "9.7 / 10",
-                    "reason": "Mật độ xe tải nặng 19 lượt/phút, còi hơi vượt 115 dBA"
-                },
-                {
-                    "name": "Điểm rủi ro âm thanh: Trục Xa lộ Hà Nội - Ngã 4 Thủ Đức",
-                    "coordinates": [106.770, 10.842],
-                    "ari": "9.4 / 10",
-                    "reason": "Khu vực xe container phanh gấp và áp sát làn xe máy"
-                }
-            ]
-
-            # Nhãn văn bản trực tiếp trên bản đồ (Hỗ trợ người khiếm thị màu)
-            text_labels = [
-                {"text": "Tuyến A [21p - Nhanh]", "coordinates": [106.715, 10.808], "color": [255, 255, 255, 220]},
-                {"text": "⭐ Tuyến B [SafeRoute - 27p]", "coordinates": [106.730, 10.826], "color": [52, 211, 153, 255]},
-                {"text": "Tuyến C [36p - Gom vắng]", "coordinates": [106.705, 10.855], "color": [186, 230, 253, 220]},
-                {"text": "⚠️ Điểm rủi ro Hàng Xanh", "coordinates": [106.715, 10.795], "color": [248, 113, 113, 255]},
-                {"text": "⚠️ Điểm rủi ro Thủ Đức", "coordinates": [106.770, 10.835], "color": [248, 113, 113, 255]}
             ]
 
             path_layer = pdk.Layer(
@@ -606,9 +806,9 @@ else:
                 hotspots_data,
                 get_position="coordinates",
                 get_color=[239, 68, 68, 210],
-                get_radius=500,
+                get_radius=420,
                 radius_min_pixels=9,
-                radius_max_pixels=26,
+                radius_max_pixels=24,
                 pickable=True
             )
 
@@ -624,12 +824,9 @@ else:
             )
 
             # Lớp ghim điểm xuất phát và đích đến theo tọa độ GPS hiệu chuẩn
-            orig_pos = CALIBRATED_LOCATIONS.get(st.session_state.origin, {}).get("coords", [106.6578, 10.7725])
-            dest_pos = CALIBRATED_LOCATIONS.get(st.session_state.destination, {}).get("coords", [106.7905, 10.8522])
-
             od_pins = [
-                {"name": f"Điểm xuất phát: {st.session_state.origin}", "coordinates": orig_pos, "color": [16, 185, 129, 255], "desc": "Điểm bắt đầu hành trình"},
-                {"name": f"Điểm đến: {st.session_state.destination}", "coordinates": dest_pos, "color": [239, 68, 68, 255], "desc": "Điểm kết thúc hành trình"}
+                {"name": f"Điểm xuất phát: {st.session_state.origin}", "coordinates": orig_pos, "color": [16, 185, 129, 255], "desc": f"Xuất phát: {st.session_state.origin}"},
+                {"name": f"Điểm đến: {st.session_state.destination}", "coordinates": dest_pos, "color": [239, 68, 68, 255], "desc": f"Đích đến: {st.session_state.destination}"}
             ]
 
             pin_layer = pdk.Layer(
@@ -637,13 +834,14 @@ else:
                 od_pins,
                 get_position="coordinates",
                 get_color="color",
-                get_radius=450,
+                get_radius=480,
                 radius_min_pixels=11,
-                radius_max_pixels=24,
+                radius_max_pixels=25,
                 pickable=True
             )
 
-            view_state = pdk.ViewState(latitude=10.812, longitude=106.723, zoom=11.2, pitch=0)
+            # Camera ViewState tự động thích ứng với vị trí và khoảng cách O-D
+            view_state = pdk.ViewState(latitude=cam_lat, longitude=cam_lon, zoom=cam_zoom, pitch=0)
             deck = pdk.Deck(
                 layers=[path_layer, hotspot_layer, pin_layer, text_layer],
                 initial_view_state=view_state,

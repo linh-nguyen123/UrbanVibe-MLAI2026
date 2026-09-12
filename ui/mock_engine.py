@@ -152,73 +152,114 @@ def generate_mock_payload(force_danger_type: Optional[str] = None) -> DetectionP
 
 
 # ============================================================================
-# 2. MOCK PRE-TRIP DECISION INTELLIGENCE (GIẢ LẬP MA TRẬN ĐÁNH ĐỔI LỘ TRÌNH)
+# 2. MOCK PRE-TRIP DECISION INTELLIGENCE (GIẢ LẬP MA TRẬN ĐÁNH ĐỔI LỘ TRÌNH ĐỘNG)
 # ============================================================================
+
+import math
+
+def calculate_haversine_distance(c1: List[float], c2: List[float]) -> float:
+    """Tính khoảng cách đường chim bay (km) giữa 2 tọa độ GPS [lon, lat]."""
+    lon1, lat1 = c1
+    lon2, lat2 = c2
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
+    return round(2 * R * math.asin(math.sqrt(max(0.0, a))), 2)
 
 def generate_mock_decision_response(
     origin: str = "ĐH Bách Khoa CS1 (Quận 10)",
     destination: str = "Bến xe Miền Đông Mới (TP. Thủ Đức)",
-    profile: Optional[UserPreferenceProfile] = None
+    profile: Optional[UserPreferenceProfile] = None,
+    orig_coords: Optional[List[float]] = None,
+    dest_coords: Optional[List[float]] = None
 ) -> DecisionResponse:
     """
     Sinh gói phản hồi ra quyết định lộ trình hoàn chỉnh mô phỏng dữ liệu giao thông TP.HCM.
+    Tự động tính toán khoảng cách thực địa km và thời gian di chuyển dựa trên tọa độ O-D.
     Tính toán hàm chi phí MCDA C(P) dựa trên profile trọng số của người dùng.
     """
     if profile is None:
         profile = UserPreferenceProfile.get_presets()["BALANCED"]
 
+    # Ước lượng khoảng cách thực địa giữa 2 điểm
+    if orig_coords and dest_coords:
+        dist_direct = calculate_haversine_distance(orig_coords, dest_coords)
+    else:
+        dist_direct = 9.2
+
+    # Tránh khoảng cách 0 nếu trùng điểm
+    dist_direct = max(1.8, dist_direct)
+
+    # Tính toán cự ly thực tế qua mạng lưới giao thông đô thị
+    dist_a = max(2.4, round(dist_direct * 1.22, 1))
+    dist_b = max(2.7, round(dist_direct * 1.34, 1))
+    dist_c = max(3.1, round(dist_direct * 1.56, 1))
+
+    # Thời gian di chuyển ước lượng (vận tốc trung bình ~25 km/h trong giờ cao điểm)
+    dur_a = max(7.0, round((dist_a / 25.0) * 60.0, 0))
+    dur_b = max(9.0, round(dur_a * 1.28, 0))   # Chấp nhận thêm ~28% thời gian
+    dur_c = max(12.0, round(dur_a * 1.62, 0))  # Vành đai xa thêm ~62% thời gian
+
     # Định nghĩa 3 kịch bản lộ trình chuẩn thực địa
-    # Tuyến A: Trục chính Điện Biên Phủ - Xa lộ Hà Nội (Nhanh, nhưng nhiều xe tải và còi hơi)
+    # Tuyến A: Trục chính (Nhanh nhất nhưng nhiều xe tải và còi hơi)
     scen_a = RouteScenario(
         scenario_id="SCENARIO_A",
         title="Tuyến Nhanh Nhất (Google Maps Baseline)",
-        route_summary="Lý Thường Kiệt ➔ Điện Biên Phủ ➔ Cầu Sài Gòn ➔ Xa lộ Hà Nội",
-        duration_min=21.0,
-        distance_km=9.8,
+        route_summary=f"{origin.split('(')[0].strip()} ➔ Trục giao thông chính (Nhiều xe tải) ➔ {destination.split('(')[0].strip()}",
+        duration_min=dur_a,
+        distance_km=dist_a,
         avg_ari=8.4,
         ari_p90=9.7,
         composite_ari_eval=0.6 * 8.4 + 0.4 * 9.7,  # 8.92
         uncertainty_penalty=0.08,
-        truck_exposure_count=19,
+        truck_exposure_count=max(4, int(dist_a * 1.8)),
         mcda_cost=0.0,
         is_pareto_optimal=True,
         is_recommended=False,
         xai_explanation=(
-            "⚠️ Tuyến nhanh nhất nhưng có mức rủi ro âm thanh rất cao (ARI 8.4/10). "
-            "Người lái bị phơi nhiễm 19 lượt xe tải/xe ben hạng nặng và 2 điểm đen giao thông bạo lực âm thanh."
+            f"⚠️ Tuyến nhanh nhất ({dur_a:.0f} phút) nhưng có mức rủi ro âm thanh rất cao (ARI 8.4/10). "
+            f"Người lái bị phơi nhiễm khoảng {max(4, int(dist_a * 1.8))} lượt xe tải nặng và đi qua các nút giao điểm đen bạo lực âm thanh."
         ),
-        waypoints=[(10.772, 106.657), (10.795, 106.710), (10.845, 106.775)]
+        waypoints=[
+            (orig_coords[1], orig_coords[0]) if orig_coords else (10.772, 106.657),
+            (dest_coords[1], dest_coords[0]) if dest_coords else (10.852, 106.790)
+        ]
     )
 
     # Tuyến B: SafeRoute Khuyên Dùng (Đường gom, tránh trục xe tải lớn, êm ái hơn 77%)
+    diff_min = dur_b - dur_a
     scen_b = RouteScenario(
         scenario_id="SCENARIO_B",
         title="SafeRoute (Khuyến Nghị Cân Bằng)",
-        route_summary="Bắc Hải ➔ Phan Đăng Lưu ➔ Hoàng Hoa Thám ➔ Đường gom Song Hành",
-        duration_min=27.0,
-        distance_km=10.9,
+        route_summary=f"{origin.split('(')[0].strip()} ➔ Phố gom Song Hành / Tuyến an toàn ➔ {destination.split('(')[0].strip()}",
+        duration_min=dur_b,
+        distance_km=dist_b,
         avg_ari=1.9,
         ari_p90=3.1,
         composite_ari_eval=0.6 * 1.9 + 0.4 * 3.1,  # 2.38
         uncertainty_penalty=0.14,
-        truck_exposure_count=2,
+        truck_exposure_count=max(1, int(dist_b * 0.2)),
         mcda_cost=0.0,
         is_pareto_optimal=True,
         is_recommended=False,
         xai_explanation=(
-            "⭐ KHUYÊN DÙNG TỐI ƯU: Chấp nhận tốn thêm 6 phút (+28% thời gian) nhưng giúp giảm đến 77.4% "
-            "mức phơi nhiễm rủi ro âm thanh, tránh hoàn toàn các nút giao điểm đen xe tải và giữ ARI P90 ở mức an toàn 3.1/10."
+            f"⭐ KHUYÊN DÙNG TỐI ƯU: Chấp nhận tốn thêm {diff_min:.0f} phút nhưng giúp giảm đến 77.4% "
+            f"mức phơi nhiễm rủi ro âm thanh, tránh hoàn toàn các nút giao điểm đen xe tải và giữ ARI P90 ở mức an toàn 3.1/10."
         ),
-        waypoints=[(10.772, 106.657), (10.798, 106.685), (10.835, 106.745), (10.850, 106.780)]
+        waypoints=[
+            (orig_coords[1], orig_coords[0]) if orig_coords else (10.772, 106.657),
+            (dest_coords[1], dest_coords[0]) if dest_coords else (10.850, 106.780)
+        ]
     )
 
     # Tuyến C: Tuyến Đa Phương Thức / Đường Nội Bộ (Rất an toàn nhưng xa và bất định cao)
     scen_c = RouteScenario(
         scenario_id="SCENARIO_C",
-        title="Tuyến Vành Đai Vắng / Đường Gom Nội Bộ",
-        route_summary="Trường Chinh ➔ Phạm Văn Đồng ➔ Đường nội bộ Làng Đại học",
-        duration_min=36.0,
-        distance_km=13.4,
+        title="Tuyến Vành Đai Vắng / Đường Phụ",
+        route_summary=f"{origin.split('(')[0].strip()} ➔ Vành đai đô thị thoáng ➔ {destination.split('(')[0].strip()}",
+        duration_min=dur_c,
+        distance_km=dist_c,
         avg_ari=0.8,
         ari_p90=1.2,
         composite_ari_eval=0.6 * 0.8 + 0.4 * 1.2,  # 0.96
@@ -228,10 +269,13 @@ def generate_mock_decision_response(
         is_pareto_optimal=True,
         is_recommended=False,
         xai_explanation=(
-            "🛡️ Tuyến cực kỳ êm dịu (gần như không có tiếng còi xe và 0 lượt xe tải), "
-            "nhưng thời gian di chuyển tăng thêm 15 phút và mức độ bất định dữ liệu cao (U = 0.42) do đi qua nhiều ngõ phụ ít người đo."
+            f"🛡️ Tuyến cực kỳ êm dịu (gần như không có tiếng còi xe và 0 lượt xe tải), "
+            f"nhưng thời gian di chuyển tăng thêm {dur_c - dur_a:.0f} phút và mức độ bất định dữ liệu cao (U = 0.42) do đi qua nhiều đường phụ ít cảm biến đo."
         ),
-        waypoints=[(10.772, 106.657), (10.820, 106.675), (10.865, 106.755), (10.852, 106.790)]
+        waypoints=[
+            (orig_coords[1], orig_coords[0]) if orig_coords else (10.772, 106.657),
+            (dest_coords[1], dest_coords[0]) if dest_coords else (10.852, 106.790)
+        ]
     )
 
     candidates = [scen_a, scen_b, scen_c]
