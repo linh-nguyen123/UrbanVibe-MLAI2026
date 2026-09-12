@@ -38,6 +38,13 @@ from data_contract import (
     RouteScenario,
     DecisionResponse
 )
+import importlib
+import ui.mock_engine
+try:
+    importlib.reload(ui.mock_engine)
+except Exception:
+    pass
+
 from ui.mock_engine import (
     generate_mock_payload,
     generate_mock_decision_response
@@ -59,7 +66,9 @@ st.set_page_config(
 # ============================================================================
 
 if "origin" not in st.session_state:
-    st.session_state.origin = "ĐH Bách Khoa CS1 (Quận 10)"
+    st.session_state.origin = "ĐH Bách Khoa CS1 (Quận 10, TP.HCM)"
+elif st.session_state.origin == "ĐH Bách Khoa CS1 (Quận 10)":
+    st.session_state.origin = "ĐH Bách Khoa CS1 (Quận 10, TP.HCM)"
 
 if "destination" not in st.session_state:
     st.session_state.destination = "Bến xe Miền Đông Mới (TP. Thủ Đức)"
@@ -107,6 +116,12 @@ CALIBRATED_LOCATIONS = {
         "aliases": ["spkt", "đh spkt", "dh spkt", "dh spkt tp hcm", "spkt tp hcm", "hcmute", "su pham ky thuat", "thu duc"]
     },
     "ĐH Bách Khoa CS1 (Quận 10, TP.HCM)": {
+        "coords": [106.6578, 10.7725],
+        "category": "🎓 Trường Đại học Trọng điểm",
+        "address": "268 Lý Thường Kiệt, P.14, Q.10, TP.HCM",
+        "aliases": ["bk", "bach khoa", "dh bk", "dh bk cs1", "ly thuong kiet", "quan 10", "dh bach khoa cs1 (quan 10)", "quan 10 tp hcm"]
+    },
+    "ĐH Bách Khoa CS1 (Quận 10)": {
         "coords": [106.6578, 10.7725],
         "category": "🎓 Trường Đại học Trọng điểm",
         "address": "268 Lý Thường Kiệt, P.14, Q.10, TP.HCM",
@@ -346,6 +361,56 @@ def normalize_vietnamese(text: str) -> str:
     text = re.sub(r'[ỳýỵỷỹ]', 'y', text, flags=re.I)
     text = re.sub(r'[đĐ]', 'd', text, flags=re.I)
     return text.lower().strip()
+
+
+def get_location_metadata(name: str, locations_dict: Dict) -> Dict:
+    """
+    Truy xuất metadata của địa điểm (coords, category, address) an toàn,
+    tự động đối chiếu tương thích ngược (aliases, fuzzy match tên cũ/mới).
+    Luôn đảm bảo trả về coords hợp lệ dạng [lon, lat], không bao giờ trả về None.
+    """
+    default_meta = {
+        "coords": [106.6578, 10.7725],
+        "category": "📍 Điểm mốc bản đồ",
+        "address": name or "TP. Hồ Chí Minh"
+    }
+    if not name:
+        return default_meta
+
+    # 1. Khớp chính xác key
+    if name in locations_dict:
+        meta = dict(locations_dict[name])
+        if not meta.get("coords") or not isinstance(meta["coords"], (list, tuple)) or len(meta["coords"]) < 2:
+            meta["coords"] = default_meta["coords"]
+        return meta
+
+    # 2. Khớp key chuẩn hóa (bỏ dấu tiếng Việt, chữ thường)
+    norm_name = normalize_vietnamese(name)
+    for k, v in locations_dict.items():
+        if normalize_vietnamese(k) == norm_name:
+            meta = dict(v)
+            if not meta.get("coords") or not isinstance(meta["coords"], (list, tuple)) or len(meta["coords"]) < 2:
+                meta["coords"] = default_meta["coords"]
+            return meta
+
+    # 3. Khớp chuỗi con hoặc alias (VD: 'ĐH Bách Khoa CS1 (Quận 10)' khớp 'ĐH Bách Khoa CS1 (Quận 10, TP.HCM)')
+    for k, v in locations_dict.items():
+        norm_k = normalize_vietnamese(k)
+        if norm_name in norm_k or norm_k in norm_name:
+            meta = dict(v)
+            if not meta.get("coords") or not isinstance(meta["coords"], (list, tuple)) or len(meta["coords"]) < 2:
+                meta["coords"] = default_meta["coords"]
+            return meta
+        for alias in v.get("aliases", []):
+            norm_alias = normalize_vietnamese(alias)
+            if norm_alias == norm_name or norm_name in norm_alias or norm_alias in norm_name:
+                meta = dict(v)
+                if not meta.get("coords") or not isinstance(meta["coords"], (list, tuple)) or len(meta["coords"]) < 2:
+                    meta["coords"] = default_meta["coords"]
+                return meta
+
+    # 4. Fallback an toàn tuyệt đối
+    return default_meta
 
 
 def search_calibrated_locations(query: str, locations_dict: Dict) -> List[str]:
@@ -874,6 +939,21 @@ else:
             on_change=on_select_preset_route
         )
 
+        # Chuẩn hóa st.session_state.origin và destination nếu tên cũ tương ứng với key trong all_locations
+        if st.session_state.origin not in all_locations:
+            for k in all_locations:
+                if (normalize_vietnamese(st.session_state.origin) in normalize_vietnamese(k) or 
+                    normalize_vietnamese(k) in normalize_vietnamese(st.session_state.origin)):
+                    st.session_state.origin = k
+                    break
+
+        if st.session_state.destination not in all_locations:
+            for k in all_locations:
+                if (normalize_vietnamese(st.session_state.destination) in normalize_vietnamese(k) or 
+                    normalize_vietnamese(k) in normalize_vietnamese(st.session_state.destination)):
+                    st.session_state.destination = k
+                    break
+
         col_in1, col_in2, col_in3 = st.columns([2, 2, 2])
         loc_names = list(all_locations.keys())
 
@@ -892,10 +972,11 @@ else:
                 options=loc_names,
                 index=orig_idx
             )
-            orig_meta = all_locations.get(st.session_state.origin, {})
+            orig_meta = get_location_metadata(st.session_state.origin, all_locations)
+            orig_pos = orig_meta.get("coords", [106.6578, 10.7725])
             st.markdown(
                 f"<div style='font-size: 11px; color: #a7f3d0; background: #064e3b; padding: 4px 8px; border-radius: 6px; margin-top: -6px;'>"
-                f"📍 <b>GPS:</b> {orig_meta.get('coords')} · <i>{orig_meta.get('address', 'Địa chỉ bản đồ OSM')}</i>"
+                f"📍 <b>GPS:</b> [{orig_pos[0]:.4f}, {orig_pos[1]:.4f}] · <i>{orig_meta.get('address', 'Địa chỉ bản đồ OSM')}</i>"
                 f"</div>",
                 unsafe_allow_html=True
             )
@@ -906,10 +987,11 @@ else:
                 options=loc_names,
                 index=dest_idx
             )
-            dest_meta = all_locations.get(st.session_state.destination, {})
+            dest_meta = get_location_metadata(st.session_state.destination, all_locations)
+            dest_pos = dest_meta.get("coords", [106.7722, 10.8507])
             st.markdown(
                 f"<div style='font-size: 11px; color: #fecaca; background: #450a0a; padding: 4px 8px; border-radius: 6px; margin-top: -6px;'>"
-                f"🏁 <b>GPS:</b> {dest_meta.get('coords')} · <i>{dest_meta.get('address', 'Địa chỉ bản đồ OSM')}</i>"
+                f"🏁 <b>GPS:</b> [{dest_pos[0]:.4f}, {dest_pos[1]:.4f}] · <i>{dest_meta.get('address', 'Địa chỉ bản đồ OSM')}</i>"
                 f"</div>",
                 unsafe_allow_html=True
             )
@@ -936,16 +1018,21 @@ else:
             f"(Ràng buộc an toàn cứng: $ARI_{{max}} \\le {active_profile.tau_cutoff:.1f}$)"
         )
 
-        orig_pos = all_locations.get(st.session_state.origin, {}).get("coords", [106.6578, 10.7725])
-        dest_pos = all_locations.get(st.session_state.destination, {}).get("coords", [106.7722, 10.8507])
-
-        decision_resp = generate_mock_decision_response(
-            origin=st.session_state.origin,
-            destination=st.session_state.destination,
-            profile=active_profile,
-            orig_coords=orig_pos,
-            dest_coords=dest_pos
-        )
+        try:
+            decision_resp = generate_mock_decision_response(
+                origin=st.session_state.origin,
+                destination=st.session_state.destination,
+                profile=active_profile,
+                orig_coords=orig_pos,
+                dest_coords=dest_pos
+            )
+        except TypeError:
+            # Fallback phòng vệ nếu module mock_engine cũ trong cache RAM
+            decision_resp = generate_mock_decision_response(
+                origin=st.session_state.origin,
+                destination=st.session_state.destination,
+                profile=active_profile
+            )
 
         st.markdown("---")
         col_map, col_matrix = st.columns([1, 1], gap="medium")

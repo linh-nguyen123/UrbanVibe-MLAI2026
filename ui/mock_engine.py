@@ -172,7 +172,8 @@ def generate_mock_decision_response(
     destination: str = "Bến xe Miền Đông Mới (TP. Thủ Đức)",
     profile: Optional[UserPreferenceProfile] = None,
     orig_coords: Optional[List[float]] = None,
-    dest_coords: Optional[List[float]] = None
+    dest_coords: Optional[List[float]] = None,
+    **kwargs
 ) -> DecisionResponse:
     """
     Sinh gói phản hồi ra quyết định lộ trình hoàn chỉnh mô phỏng dữ liệu giao thông TP.HCM.
