@@ -5,3 +5,4 @@ tensorflow>=2.15.0
 tensorflow-hub>=0.16.0
 streamlit>=1.30.0
 requests>=2.31.0
+setuptools<70.0.0

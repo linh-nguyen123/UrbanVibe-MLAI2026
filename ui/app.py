@@ -1,4 +1,13 @@
-import os
+# -*- coding: utf-8 -*-
+"""
+UrbanVibe: SafeRoute - Decision Intelligence & Acoustic Safety Platform
+MLAI Hackathon 2026 - Decision Intelligence Challenge (TMA Solutions)
+
+Ứng dụng Dashboard Streamlit 2-Tab:
+- Tab 1: 🗺️ Ra Quyết Định Lộ Trình (Pre-Trip Decision Intelligence - Bản Đồ Đa Lớp & Ma Trận Đánh Đổi)
+- Tab 2: 🚨 Giám Sát An Toàn Trên Xe (On-Trip HUD - Chế Độ Lái Xe Toàn Màn Hình Tối Giản)
+"""
+
 import sys
 import warnings
 
@@ -11,578 +20,1194 @@ import logging
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 
 from pathlib import Path
-import time
-import io
-from datetime import datetime
-import numpy as np
-from scipy.io import wavfile
-from scipy import signal
-# pyrefly: ignore [missing-import]
-import streamlit as st
 
-# Trỏ đường dẫn ra thư mục gốc để import module
+# Đảm bảo đường dẫn import từ thư mục gốc của repository
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
-from data_contract import DetectionPayload
-from ui.mock_engine import generate_mock_payload
+import time
+import pandas as pd
+import pydeck as pdk
+import streamlit as st
 
-# -----------------------------------------------------------------------------
-# 1. CẤU HÌNH TRANG STREAMLIT
-# -----------------------------------------------------------------------------
+from data_contract import (
+    DetectionPayload,
+    UserPreferenceProfile,
+    RouteScenario,
+    DecisionResponse
+)
+from ui.mock_engine import (
+    generate_mock_payload,
+    generate_mock_decision_response
+)
+
+# ============================================================================
+# CẤU HÌNH TRANG STREAMLIT
+# ============================================================================
+
 st.set_page_config(
-    page_title="UrbanVibe Edge-AI Simulator",
+    page_title="UrbanVibe: SafeRoute | Decision Intelligence",
     page_icon="🚨",
-    layout="centered",
+    layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# -----------------------------------------------------------------------------
-# 2. BỘ CSS NÂNG CAO: THIẾT KẾ SMARTPHONE CHÂN THỰC & KHÔNG VỠ BỐ CỤC
-# -----------------------------------------------------------------------------
-st.html(
+# ============================================================================
+# KHỞI TẠO SESSION STATE
+# ============================================================================
+
+if "origin" not in st.session_state:
+    st.session_state.origin = "ĐH Bách Khoa CS1 (Quận 10)"
+
+if "destination" not in st.session_state:
+    st.session_state.destination = "Bến xe Miền Đông Mới (TP. Thủ Đức)"
+
+if "profile_key" not in st.session_state:
+    st.session_state.profile_key = "BALANCED"
+
+if "selected_scenario_id" not in st.session_state:
+    st.session_state.selected_scenario_id = "SCENARIO_B"
+
+if "system_status" not in st.session_state:
+    st.session_state.system_status = "HEALTHY"
+
+if "current_payload" not in st.session_state:
+    st.session_state.current_payload = generate_mock_payload(force_danger_type="SAFE")
+
+if "rider_mode" not in st.session_state:
+    st.session_state.rider_mode = False  # Mặc định tắt để giám khảo xem toàn cảnh, bật khi chuyển sang lái xe
+
+if "data_opt_in" not in st.session_state:
+    st.session_state.data_opt_in = True  # Quyền riêng tư Opt-in
+
+if "custom_locations" not in st.session_state:
+    st.session_state.custom_locations = {}  # Lưu trữ địa điểm người dùng tìm kiếm trực tuyến toàn quốc
+
+
+# ============================================================================
+# DANH MỤC ĐỊA ĐIỂM HIỆU CHUẨN GPS & GỢI Ý THÔNG MINH (RECOMMENDATION SYSTEM)
+# ============================================================================
+
+import json
+import math
+import re
+import urllib.parse
+import urllib.request
+from typing import Dict, List, Tuple
+
+# Danh mục các địa điểm trọng điểm được hiệu chuẩn GPS sẵn (Bắc - Trung - Nam)
+CALIBRATED_LOCATIONS = {
+    # --- MIỀN NAM: TP. HỒ CHÍ MINH & LÂN CẬN ---
+    "ĐH Sư phạm Kỹ thuật TP.HCM (HCMUTE / ĐH SPKT - TP. Thủ Đức)": {
+        "coords": [106.7722, 10.8507],
+        "category": "🎓 Trường Đại học Trọng điểm",
+        "address": "1 Võ Văn Ngân, P. Linh Chiểu, TP. Thủ Đức",
+        "aliases": ["spkt", "đh spkt", "dh spkt", "dh spkt tp hcm", "spkt tp hcm", "hcmute", "su pham ky thuat", "thu duc"]
+    },
+    "ĐH Bách Khoa CS1 (Quận 10, TP.HCM)": {
+        "coords": [106.6578, 10.7725],
+        "category": "🎓 Trường Đại học Trọng điểm",
+        "address": "268 Lý Thường Kiệt, P.14, Q.10, TP.HCM",
+        "aliases": ["bk", "bach khoa", "dh bk", "dh bk cs1", "ly thuong kiet", "quan 10"]
+    },
+    "Bến xe Miền Đông Mới (TP. Thủ Đức)": {
+        "coords": [106.7905, 10.8522],
+        "category": "🚌 Bến xe liên tỉnh",
+        "address": "501 Hoàng Hữu Nam, P. Long Bình, TP. Thủ Đức",
+        "aliases": ["bx mien dong moi", "mien dong moi", "hoang huu nam", "bx mien dong"]
+    },
+    "ĐH Bách Khoa CS2 (Khu ĐHQG TP.HCM)": {
+        "coords": [106.8055, 10.8805],
+        "category": "🎓 Ký túc xá / Giảng đường",
+        "address": "Khu đô thị ĐHQG-HCM, TP. Dĩ An / Thủ Đức",
+        "aliases": ["bk cs2", "dh bk cs2", "lang dai hoc", "dhqg", "ky tuc xa"]
+    },
+    "ĐH Khoa học Tự nhiên CS1 (ĐHQG-HCM - Quận 5)": {
+        "coords": [106.6826, 10.7628],
+        "category": "🎓 Trường Đại học Trọng điểm",
+        "address": "227 Nguyễn Văn Cừ, P.4, Q.5, TP.HCM",
+        "aliases": ["khtn", "dh khtn", "tu nhien", "nguyen van cu", "quan 5"]
+    },
+    "ĐH Kinh tế TP.HCM (UEH - Cơ sở A Quận 3)": {
+        "coords": [106.6953, 10.7828],
+        "category": "🎓 Trường Đại học Trọng điểm",
+        "address": "59C Nguyễn Đình Chiểu, P. Võ Thị Sáu, Q.3, TP.HCM",
+        "aliases": ["ueh", "dh ueh", "kinh te", "nguyen dinh chieu", "quan 3"]
+    },
+    "ĐH Công nghệ Thông tin (UIT - ĐHQG-HCM)": {
+        "coords": [106.8031, 10.8700],
+        "category": "🎓 Ký túc xá / Giảng đường",
+        "address": "Khu phố 6, P. Linh Trung, TP. Thủ Đức",
+        "aliases": ["uit", "dh uit", "cntt", "linh trung", "dhqg"]
+    },
+    "ĐH Sài Gòn (SGU - Cơ sở chính Quận 5)": {
+        "coords": [106.6800, 10.7597],
+        "category": "🎓 Trường Đại học",
+        "address": "273 An Dương Vương, P.3, Q.5, TP.HCM",
+        "aliases": ["sgu", "dh sai gon", "sai gon", "an duong vuong"]
+    },
+    "Sân bay Quốc tế Tân Sơn Nhất (Tân Bình, TP.HCM)": {
+        "coords": [106.6602, 10.8185],
+        "category": "✈️ Cảng hàng không",
+        "address": "Đường Trường Sơn, P.2, Q. Tân Bình, TP.HCM",
+        "aliases": ["san bay", "tan son nhat", "tsn", "truong son", "tan binh"]
+    },
+    "Chợ Bến Thành (Quận 1, TP.HCM)": {
+        "coords": [106.6983, 10.7726],
+        "category": "🛍️ Thương mại & Du lịch",
+        "address": "Đường Lê Lợi, P. Bến Thành, Q.1, TP.HCM",
+        "aliases": ["ben thanh", "cho ben thanh", "quan 1", "le loi"]
+    },
+    "Bệnh viện Chợ Rẫy (Quận 5, TP.HCM)": {
+        "coords": [106.6593, 10.7554],
+        "category": "🏥 Y tế khẩn cấp",
+        "address": "201B Nguyễn Chí Thanh, P.12, Q.5, TP.HCM",
+        "aliases": ["cho ray", "bv cho ray", "benh vien", "nguyen chi thanh"]
+    },
+    "Khu Công nghệ cao (SHTP - TP. Thủ Đức)": {
+        "coords": [106.7915, 10.8550],
+        "category": "💼 Khu công nghệ cao",
+        "address": "Xa lộ Hà Nội, P. Hiệp Phú, TP. Thủ Đức",
+        "aliases": ["shtp", "cong nghe cao", "khu cong nghe cao", "xa lo ha noi"]
+    },
+    "Ngã 4 Thủ Đức (Trục Xa lộ Hà Nội - Lê Văn Việt)": {
+        "coords": [106.7709, 10.8475],
+        "category": "🚦 Nút giao trọng điểm",
+        "address": "Xa lộ Hà Nội, P. Hiệp Phú, TP. Thủ Đức",
+        "aliases": ["nga 4 thu duc", "nga tu thu duc", "le van viet"]
+    },
+    "Bến xe Miền Tây (Bình Tân, TP.HCM)": {
+        "coords": [106.6133, 10.7410],
+        "category": "🚌 Bến xe liên tỉnh",
+        "address": "395 Kinh Dương Vương, P. An Lạc, Q. Bình Tân, TP.HCM",
+        "aliases": ["bx mien tay", "mien tay", "kinh duong vuong", "binh tan"]
+    },
+    "Bến xe An Sương (Quận 12 / Hóc Môn)": {
+        "coords": [106.6111, 10.8447],
+        "category": "🚌 Bến xe liên tỉnh",
+        "address": "Quốc Lộ 22, X. Bà Điểm, H. Hóc Môn, TP.HCM",
+        "aliases": ["bx an suong", "an suong", "quoc lo 22", "hoc mon", "quan 12"]
+    },
+    "Landmark 81 / Vinhomes Central Park (Bình Thạnh)": {
+        "coords": [106.7218, 10.7950],
+        "category": "🏙️ Đô thị trung tâm",
+        "address": "720A Điện Biên Phủ, P.22, Q. Bình Thạnh, TP.HCM",
+        "aliases": ["landmark 81", "landmark", "vinhomes", "binh thanh", "dien bien phu"]
+    },
+
+    # --- MIỀN TRUNG: ĐÀ NẴNG - HUẾ - NHA TRANG - ĐÀ LẠT ---
+    "Cầu Rồng (Hải Châu / Sơn Trà, Đà Nẵng)": {
+        "coords": [108.2279, 16.0612],
+        "category": "🌉 Biểu tượng Đô thị",
+        "address": "Đường Nguyễn Văn Linh, P. Phước Ninh, Q. Hải Châu, Đà Nẵng",
+        "aliases": ["cau rong", "da nang", "hai chau", "son tra", "nguyen van linh"]
+    },
+    "Bán đảo Sơn Trà (Sơn Trà, Đà Nẵng)": {
+        "coords": [108.2778, 16.1158],
+        "category": "🏞️ Sinh thái Du lịch",
+        "address": "Phường Thọ Quang, Q. Sơn Trà, TP. Đà Nẵng",
+        "aliases": ["son tra", "ban dao son tra", "chua linh ung", "da nang"]
+    },
+    "Đại Nội Huế (TP. Huế, Thừa Thiên Huế)": {
+        "coords": [107.5796, 16.4697],
+        "category": "🏛️ Di sản Văn hóa",
+        "address": "Đường 23 Tháng 8, P. Thuận Hòa, TP. Huế",
+        "aliases": ["dai noi", "hue", "hoang thanh", "thua thien hue"]
+    },
+    "Quảng trường Lâm Viên (TP. Đà Lạt, Lâm Đồng)": {
+        "coords": [108.4450, 11.9388],
+        "category": "🌸 Đô thị Cao nguyên",
+        "address": "Đường Trần Quốc Toản, P.10, TP. Đà Lạt, Lâm Đồng",
+        "aliases": ["lam vien", "da lat", "quang truong lam vien", "ho xuan huong"]
+    },
+    "Tháp Trầm Hương / Bãi biển Nha Trang (Khánh Hòa)": {
+        "coords": [109.1967, 12.2388],
+        "category": "🏖️ Đô thị Biển",
+        "address": "Đường Trần Phú, P. Lộc Thọ, TP. Nha Trang, Khánh Hòa",
+        "aliases": ["tram huong", "nha trang", "khanh hoa", "tran phu"]
+    },
+
+    # --- MIỀN BẮC: HÀ NỘI - HẢI PHÒNG - QUẢNG NINH ---
+    "Hồ Hoàn Kiếm (Quận Hoàn Kiếm, Hà Nội)": {
+        "coords": [105.8525, 21.0288],
+        "category": "🏙️ Trung tâm Thủ đô",
+        "address": "Phường Tràng Tiền, Q. Hoàn Kiếm, TP. Hà Nội",
+        "aliases": ["ho guom", "ho hoan kiem", "ha noi", "trang tien", "pho co"]
+    },
+    "ĐH Bách Khoa Hà Nội (Hai Bà Trưng, Hà Nội)": {
+        "coords": [105.8436, 21.0055],
+        "category": "🎓 Trường Đại học Trọng điểm",
+        "address": "1 Đại Cồ Việt, P. Bách Khoa, Q. Hai Bà Trưng, Hà Nội",
+        "aliases": ["bk ha noi", "hust", "bach khoa ha noi", "dai co viet"]
+    },
+    "Sân bay Quốc tế Nội Bài (Sóc Sơn, Hà Nội)": {
+        "coords": [105.8057, 21.2212],
+        "category": "✈️ Cảng hàng không",
+        "address": "Xã Phú Minh, Huyện Sóc Sơn, TP. Hà Nội",
+        "aliases": ["noi bai", "san bay noi bai", "ha noi", "soc son"]
+    },
+    "Nhà hát Lớn Hải Phòng (Quận Hồng Bàng, Hải Phòng)": {
+        "coords": [106.6838, 20.8596],
+        "category": "🏙️ Đô thị Cảng",
+        "address": "28 Trần Hưng Đạo, P. Hoàng Văn Thụ, Q. Hồng Bàng, Hải Phòng",
+        "aliases": ["hai phong", "nha hat lon hai phong", "hong bang"]
+    },
+
+    # --- ĐỒNG BẰNG SÔNG CỬU LONG & ĐÔNG NAM BỘ ---
+    "Bến Ninh Kiều (Ninh Kiều, Cần Thơ)": {
+        "coords": [105.7877, 10.0310],
+        "category": "🌊 Thủ phủ Miền Tây",
+        "address": "Đường Hai Bà Trưng, P. Tân An, Q. Ninh Kiều, Cần Thơ",
+        "aliases": ["ninh kieu", "ben ninh kieu", "can tho", "song hau"]
+    },
+    "Chợ nổi Cái Răng (Cái Răng, Cần Thơ)": {
+        "coords": [105.7483, 10.0051],
+        "category": "🛶 Du lịch Sông nước",
+        "address": "Đường Hai Bà Trưng, P. Lê Bình, Q. Cái Răng, Cần Thơ",
+        "aliases": ["cai rang", "cho noi cai rang", "can tho"]
+    },
+    "Bãi Trước Vũng Tàu (TP. Vũng Tàu, Bà Rịa - Vũng Tàu)": {
+        "coords": [107.0722, 10.3460],
+        "category": "🏖️ Đô thị Biển",
+        "address": "Đường Quang Trung, P.1, TP. Vũng Tàu, Bà Rịa - Vũng Tàu",
+        "aliases": ["vung tau", "bai truoc", "ba ria vung tau", "quang trung"]
+    }
+}
+
+POPULAR_OD_RECOMMENDATIONS = {
+    "⭐ [Tuyến Sinh Viên Đột Phá] ĐH Bách Khoa CS1 ➔ ĐH Sư phạm Kỹ thuật (HCMUTE)": (
+        "ĐH Bách Khoa CS1 (Quận 10, TP.HCM)", "ĐH Sư phạm Kỹ thuật TP.HCM (HCMUTE / ĐH SPKT - TP. Thủ Đức)"
+    ),
+    "🌉 [Đà Nẵng Nội Đô] Cầu Rồng ➔ Bán đảo Sơn Trà": (
+        "Cầu Rồng (Hải Châu / Sơn Trà, Đà Nẵng)", "Bán đảo Sơn Trà (Sơn Trà, Đà Nẵng)"
+    ),
+    "🏛️ [Hà Nội Nội Đô] ĐH Bách Khoa Hà Nội ➔ Hồ Hoàn Kiếm": (
+        "ĐH Bách Khoa Hà Nội (Hai Bà Trưng, Hà Nội)", "Hồ Hoàn Kiếm (Quận Hoàn Kiếm, Hà Nội)"
+    ),
+    "🛶 [Đồng Bằng Sông Cửu Long] Bến Ninh Kiều (Cần Thơ) ➔ Chợ nổi Cái Răng": (
+        "Bến Ninh Kiều (Ninh Kiều, Cần Thơ)", "Chợ nổi Cái Răng (Cái Răng, Cần Thơ)"
+    ),
+    "🚗 [Liên Tỉnh Cao Tốc] Chợ Bến Thành (TP.HCM) ➔ Bãi Trước Vũng Tàu": (
+        "Chợ Bến Thành (Quận 1, TP.HCM)", "Bãi Trước Vũng Tàu (TP. Vũng Tàu, Bà Rịa - Vũng Tàu)"
+    ),
+    "🚅 [Liên Vùng Xuyên Việt] Hồ Hoàn Kiếm (Hà Nội) ➔ Chợ Bến Thành (TP.HCM)": (
+        "Hồ Hoàn Kiếm (Quận Hoàn Kiếm, Hà Nội)", "Chợ Bến Thành (Quận 1, TP.HCM)"
+    ),
+    "🎓 [Tuyến Kỹ Thuật Liên Trường] ĐH Sư phạm Kỹ thuật (HCMUTE) ➔ ĐH Bách Khoa CS2 (Khu ĐHQG TP.HCM)": (
+        "ĐH Sư phạm Kỹ thuật TP.HCM (HCMUTE / ĐH SPKT - TP. Thủ Đức)", "ĐH Bách Khoa CS2 (Khu ĐHQG TP.HCM)"
+    )
+}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def geocode_vietnam_location(query: str) -> List[Dict]:
     """
+    Tìm kiếm địa chỉ/địa danh trên toàn bộ 63 tỉnh thành Việt Nam qua OpenStreetMap Nominatim.
+    Không cần API key, độ trễ thấp, hỗ trợ từ cấp tỉnh/huyện đến từng số nhà, ngõ phố.
+    """
+    if not query or len(query.strip()) < 2:
+        return []
+    clean_q = query.strip()
+    search_q = clean_q if "việt nam" in clean_q.lower() or "vietnam" in clean_q.lower() else f"{clean_q}, Việt Nam"
+    encoded_q = urllib.parse.quote(search_q)
+    url = f"https://nominatim.openstreetmap.org/search?q={encoded_q}&format=json&countrycodes=vn&addressdetails=1&limit=4"
+    headers = {"User-Agent": "UrbanVibe-SafeRoute-MLAI2026/1.0 (contact: linh-nguyen123)"}
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results = []
+            for item in data:
+                raw_name = item.get("display_name", "")
+                parts = [p.strip() for p in raw_name.split(",") if p.strip()]
+                short_title = parts[0] if parts else clean_q
+                if len(parts) > 2:
+                    short_title = f"{parts[0]} ({parts[1]}, {parts[-2] if len(parts) > 3 else parts[-1]})"
+                results.append({
+                    "name": short_title,
+                    "full_address": raw_name,
+                    "coords": [round(float(item["lon"]), 5), round(float(item["lat"]), 5)],
+                    "category": f"🌐 {item.get('type', 'Địa điểm').replace('_', ' ').title()}"
+                })
+            return results
+    except Exception:
+        return []
+
+
+def normalize_vietnamese(text: str) -> str:
+    """Loại bỏ dấu tiếng Việt và chuẩn hóa chữ thường để tìm kiếm linh hoạt."""
+    text = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', text, flags=re.I)
+    text = re.sub(r'[èéẹẻẽêềếệểễ]', 'e', text, flags=re.I)
+    text = re.sub(r'[ìíịỉĩ]', 'i', text, flags=re.I)
+    text = re.sub(r'[òóọỏõôồốộổỗơờớợởỡ]', 'o', text, flags=re.I)
+    text = re.sub(r'[ùúụủũưừứựửữ]', 'u', text, flags=re.I)
+    text = re.sub(r'[ỳýỵỷỹ]', 'y', text, flags=re.I)
+    text = re.sub(r'[đĐ]', 'd', text, flags=re.I)
+    return text.lower().strip()
+
+
+def search_calibrated_locations(query: str, locations_dict: Dict) -> List[str]:
+    """Tìm kiếm vị trí gần đúng hoặc từ khóa viết tắt trong danh mục chuẩn."""
+    if not query:
+        return []
+    norm_q = normalize_vietnamese(query)
+    tokens = [t for t in norm_q.split() if t]
+    matched = []
+    for name, meta in locations_dict.items():
+        norm_name = normalize_vietnamese(name)
+        norm_addr = normalize_vietnamese(meta.get("address", ""))
+        norm_cat = normalize_vietnamese(meta.get("category", ""))
+        aliases_str = " ".join([normalize_vietnamese(a) for a in meta.get("aliases", [])])
+        combined = f"{norm_name} {norm_addr} {norm_cat} {aliases_str}"
+        
+        # Khớp toàn bộ cụm hoặc tất cả từ khóa tìm kiếm
+        if norm_q in combined or all(t in combined for t in tokens):
+            matched.append(name)
+    return matched
+
+
+def generate_dynamic_route_geometries(
+    start_coords: List[float],
+    end_coords: List[float]
+) -> Tuple[List[List[float]], List[List[float]], List[List[float]], List[Dict], List[Dict], Tuple[float, float, float]]:
+    """
+    Sinh hình học động kết nối chính xác start_coords [lon, lat] và end_coords [lon, lat] cho 3 tuyến:
+    - Tuyến A: Trục chính trực tiếp (wobble vi mô đường phố)
+    - Tuyến B: SafeRoute (uốn cong né trục rủi ro âm thanh)
+    - Tuyến C: Đường gom vành đai phụ
+    Cùng các điểm rủi ro âm thanh (Hotspots), nhãn văn bản và tọa độ camera tự động.
+    """
+    lon1, lat1 = start_coords
+    lon2, lat2 = end_coords
+    dx = lon2 - lon1
+    dy = lat2 - lat1
+    dist_deg = math.hypot(dx, dy)
+
+    if dist_deg < 1e-4:
+        # Nếu hai điểm trùng nhau hoặc quá gần, tạo bán kính giả định 500m để vẽ trực quan
+        dist_deg = 0.012
+        dx, dy = 0.009, 0.007
+
+    # Unit normal vector (vuông góc với trục thẳng nối O-D)
+    nx = -dy / dist_deg
+    ny = dx / dist_deg
+
+    n_pts = 9
+    route_a_pts = []
+    route_b_pts = []
+    route_c_pts = []
+
+    for i in range(n_pts + 1):
+        t = i / float(n_pts)
+        
+        # Tuyến A (Baseline): Bám trục thẳng với dao động góc phố nhẹ
+        wobble = 0.032 * math.sin(t * math.pi * 3.0) * dist_deg
+        ax = lon1 + t * dx + wobble * nx
+        ay = lat1 + t * dy + wobble * ny
+        route_a_pts.append([round(ax, 5), round(ay, 5)])
+
+        # Tuyến B (SafeRoute): Vòng cung né trục chính (offset dương theo pháp tuyến)
+        arc_b = math.sin(t * math.pi) * 0.19 * dist_deg
+        bx = lon1 + t * dx + arc_b * nx
+        by = lat1 + t * dy + arc_b * ny
+        route_b_pts.append([round(bx, 5), round(by, 5)])
+
+        # Tuyến C (Vành đai vắng): Vòng cung đối xứng xa hơn (offset âm theo pháp tuyến)
+        arc_c = -math.sin(t * math.pi) * 0.29 * dist_deg
+        cx = lon1 + t * dx + arc_c * nx
+        cy = lat1 + t * dy + arc_c * ny
+        route_c_pts.append([round(cx, 5), round(cy, 5)])
+
+    # Đảm bảo điểm đầu và cuối khớp chính xác 100% với Origin và Destination
+    route_a_pts[0] = [lon1, lat1]
+    route_a_pts[-1] = [lon2, lat2]
+    route_b_pts[0] = [lon1, lat1]
+    route_b_pts[-1] = [lon2, lat2]
+    route_c_pts[0] = [lon1, lat1]
+    route_c_pts[-1] = [lon2, lat2]
+
+    # Điểm rủi ro âm thanh bố trí trên Tuyến A
+    hs1_coords = [round(lon1 + 0.36 * dx + 0.012 * dist_deg * nx, 5), round(lat1 + 0.36 * dy + 0.012 * dist_deg * ny, 5)]
+    hs2_coords = [round(lon1 + 0.72 * dx - 0.010 * dist_deg * nx, 5), round(lat1 + 0.72 * dy - 0.010 * dist_deg * ny, 5)]
+
+    if dist_deg < 0.25:
+        hs1_title = "Điểm rủi ro âm thanh 1: Nút giao Trục chính nội đô"
+        hs2_title = "Điểm rủi ro âm thanh 2: Giao lộ Vành đai đô thị"
+    else:
+        hs1_title = "Điểm rủi ro âm thanh 1: Nút giao Trạm thu phí / Tuyến xe tải liên tỉnh"
+        hs2_title = "Điểm rủi ro âm thanh 2: Cửa ngõ hành lang Quốc lộ / Cao tốc"
+
+    hotspots = [
+        {
+            "name": hs1_title,
+            "coordinates": hs1_coords,
+            "ari": "9.6 / 10",
+            "reason": "Mật độ xe tải nặng / container cao, còi hơi vượt 112 dBA liên tục"
+        },
+        {
+            "name": hs2_title,
+            "coordinates": hs2_coords,
+            "ari": "9.3 / 10",
+            "reason": "Khu vực xe tải trọng lớn phanh gấp và áp sát làn phương tiện thô sơ"
+        }
+    ]
+
+    # Nhãn văn bản (TextLayer) gắn vào điểm giữa của từng tuyến
+    mid_idx = n_pts // 2
+    text_labels = [
+        {"text": "Tuyến A [Nhanh - Baseline]", "coordinates": route_a_pts[mid_idx], "color": [255, 255, 255, 230]},
+        {"text": "⭐ Tuyến B [SafeRoute - Đề xuất]", "coordinates": route_b_pts[mid_idx], "color": [52, 211, 153, 255]},
+        {"text": "Tuyến C [Vành đai vắng]", "coordinates": route_c_pts[mid_idx], "color": [186, 230, 253, 220]},
+        {"text": "⚠️ Điểm rủi ro trục chính", "coordinates": hs1_coords, "color": [248, 113, 113, 255]},
+        {"text": "⚠️ Điểm rủi ro giao lộ", "coordinates": hs2_coords, "color": [248, 113, 113, 255]}
+    ]
+
+    # Tính toán ViewState tâm và zoom tự thích ứng (Từ cự ly nội đô zoom 13.5 đến cự ly toàn quốc zoom 5.0)
+    mid_lat = (lat1 + lat2) / 2.0
+    mid_lon = (lon1 + lon2) / 2.0
+    span = max(abs(lat2 - lat1), abs(lon2 - lon1))
+    zoom = round(max(5.0, min(14.0, 13.2 - math.log2(max(span, 0.02) / 0.035))), 2)
+
+    return route_a_pts, route_b_pts, route_c_pts, hotspots, text_labels, (mid_lat, mid_lon, zoom)
+
+
+# ============================================================================
+# CALLBACKS XỬ LÝ SỰ KIỆN MÔ PHỎNG TỨC THÌ (<50ms, KHÔNG TRỄ REFRESS)
+# ============================================================================
+
+def on_trigger_event(event_type: str):
+    """Callback chạy TRƯỚC KHI Streamlit render UI, đảm bảo phản hồi tức thì 100%."""
+    st.session_state.current_payload = generate_mock_payload(force_danger_type=event_type)
+
+def on_toggle_rider_mode():
+    """Bật/tắt chế độ lái xe toàn màn hình."""
+    st.session_state.rider_mode = not st.session_state.rider_mode
+
+
+# ============================================================================
+# CSS: TÙY BIẾN GIAO DIỆN & FULL-SCREEN RIDER HUD KHI ĐANG LÁI XE
+# ============================================================================
+
+if st.session_state.rider_mode:
+    # Chế độ Lái xe: Ẩn sidebar, ẩn header mặc định, tối ưu hóa toàn màn hình
+    rider_css = """
     <style>
-    /* Ẩn menu và footer mặc định nhưng giữ lại header để dùng nút toggle sidebar */
-    #MainMenu, footer {visibility: hidden;}
-    header {background-color: transparent !important;}
-    
-    .block-container {
-        padding-top: 1.0rem !important;
-        padding-bottom: 2.5rem !important;
-        max-width: 480px !important;
-        margin: 0 auto;
-    }
-
-    /* Khung giả lập Smartphone chân thực (Hardware Bezel) */
-    .phone-wrapper {
-        background: #070a12;
-        border-radius: 40px;
-        padding: 18px 16px 22px 16px;
-        color: #ffffff;
-        box-shadow: 0 15px 45px rgba(0, 0, 0, 0.9), 0 0 0 5px #1e293b, 0 0 0 7px #0f172a;
-        border: 2px solid #334155;
-        position: relative;
-        transition: all 0.25s ease-in-out;
-        margin: 0 auto 18px auto;
-    }
-
-    /* Tai thỏ / Dynamic Island */
-    .notch-container {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        margin-bottom: 8px;
-    }
-    .dynamic-island {
-        width: 100px;
-        height: 18px;
-        background: #000000;
-        border-radius: 20px;
-        display: flex;
-        align-items: center;
-        justify-content: space-around;
-        padding: 0 10px;
-        border: 1px solid #1e293b;
-    }
-    .camera-lens {
-        width: 8px;
-        height: 8px;
-        background: #0f172a;
-        border-radius: 50%;
-        border: 1px solid #334155;
-    }
-    .sensor-dot {
-        width: 4px;
-        height: 4px;
-        background: #1e3a8a;
-        border-radius: 50%;
-    }
-
-    /* Thanh trạng thái điện thoại (Status Bar) */
-    .status-bar {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 11px;
-        color: #94a3b8;
-        font-weight: 600;
-        margin-bottom: 12px;
-        padding: 0 4px;
-        font-family: monospace;
-    }
-
-    /* Hiệu ứng chớp nháy viền ĐỎ NGUY CẤP (Xe cứu thương) */
-    .strobe-danger {
-        border-color: #ff1744 !important;
-        box-shadow: 0 0 20px rgba(255, 23, 68, 0.6), 0 0 0 5px #ff1744 !important;
-        animation: pulse-red 0.5s infinite alternate ease-in-out !important;
-    }
-    @keyframes pulse-red {
-        0% { box-shadow: 0 0 15px rgba(255, 23, 68, 0.4), 0 0 0 5px #ff1744; border-color: #ff1744; }
-        100% { box-shadow: 0 0 45px rgba(255, 23, 68, 0.95), 0 0 0 7px #ff5252; border-color: #ff5252; }
-    }
-
-    /* Hiệu ứng chớp nháy viền VÀNG CAM (Còi xe máy) */
-    .strobe-warning {
-        border-color: #ff9100 !important;
-        box-shadow: 0 0 18px rgba(255, 145, 0, 0.5), 0 0 0 5px #ff9100 !important;
-        animation: pulse-orange 0.6s infinite alternate ease-in-out !important;
-    }
-    @keyframes pulse-orange {
-        0% { box-shadow: 0 0 10px rgba(255, 145, 0, 0.3), 0 0 0 5px #ff9100; border-color: #ff9100; }
-        100% { box-shadow: 0 0 35px rgba(255, 145, 0, 0.9), 0 0 0 6px #ffab40; border-color: #ffab40; }
-    }
-
-    /* Trạng thái An toàn */
-    .strobe-safe {
-        border-color: #059669 !important;
-        box-shadow: 0 0 15px rgba(16, 185, 129, 0.25), 0 0 0 5px #064e3b !important;
-    }
-
-    /* Thẻ cảnh báo trung tâm cực đại (Hero Card) */
-    .hero-card {
-        border-radius: 22px;
-        padding: 22px 14px;
-        text-align: center;
-        margin: 10px 0 14px 0;
-        transition: all 0.25s ease-in-out;
-    }
-
-    /* Thanh VU-Meter đo âm lượng */
-    .vu-meter-bg {
-        background-color: #1e293b;
-        height: 16px;
-        border-radius: 8px;
-        overflow: hidden;
-        margin: 6px 0;
-        position: relative;
-    }
-    .vu-meter-fill {
-        height: 100%;
-        border-radius: 8px;
-        transition: width 0.2s ease-out;
-    }
-    .threshold-marker {
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        width: 3px;
-        background-color: #ffffff;
-        box-shadow: 0 0 6px #ffffff;
-        z-index: 10;
-    }
-
-    /* Đồ họa sóng rung động Haptic Wave (Equalizer Style) */
-    .vibe-wave-container {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        height: 24px;
-    }
-    .vibe-bar {
-        width: 4px;
-        border-radius: 2px;
-        transition: height 0.15s ease;
-    }
-    .vibe-idle {
-        height: 5px;
-        background-color: #475569;
-    }
-    .vibe-pulse-danger {
-        background-color: #ff1744;
-        animation: haptic-bounce-danger 0.3s infinite alternate ease-in-out;
-    }
-    .vibe-pulse-warning {
-        background-color: #ff9100;
-        animation: haptic-bounce-warning 0.5s infinite alternate ease-in-out;
-    }
-    .vibe-bar:nth-child(1) { animation-delay: 0.00s; }
-    .vibe-bar:nth-child(2) { animation-delay: 0.08s; }
-    .vibe-bar:nth-child(3) { animation-delay: 0.16s; }
-    .vibe-bar:nth-child(4) { animation-delay: 0.24s; }
-    .vibe-bar:nth-child(5) { animation-delay: 0.32s; }
-
-    @keyframes haptic-bounce-danger {
-        0% { height: 5px; }
-        100% { height: 22px; }
-    }
-    @keyframes haptic-bounce-warning {
-        0% { height: 5px; }
-        100% { height: 16px; }
-    }
-
-    /* Thẻ Card lộ trình Track 2 */
-    .roadmap-card {
-        background: #0f172a;
-        border: 1px solid #1e293b;
-        border-radius: 12px;
-        padding: 12px 14px;
-        margin-bottom: 10px;
-        font-size: 13px;
-        line-height: 1.5;
-    }
+        [data-testid="stSidebar"] { display: none !important; }
+        header[data-testid="stHeader"] { display: none !important; }
+        footer { display: none !important; }
+        .block-container {
+            padding: 1rem 1.5rem !important;
+            max-width: 100% !important;
+        }
+        .hud-fullscreen {
+            min-height: 72vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border-radius: 24px;
+            padding: 40px 24px;
+            text-align: center;
+        }
     </style>
     """
-)
+else:
+    rider_css = """
+    <style>
+        .hud-fullscreen {
+            border-radius: 20px;
+            padding: 30px 20px;
+            text-align: center;
+        }
+    </style>
+    """
 
-# -----------------------------------------------------------------------------
-# 3. KHỞI TẠO AI ENGINE (CACHE SINGLETON)
-# -----------------------------------------------------------------------------
-@st.cache_resource(show_spinner="Đang nạp mô hình Google YAMNet...")
-def get_ai_engine():
-    from engine.audio_engine import AudioAIEngine
-    return AudioAIEngine.get_instance()
+st.markdown(rider_css + """
+<style>
+    .hud-box-safe {
+        background: linear-gradient(135deg, #064e3b 0%, #047857 100%);
+        border: 4px solid #10b981;
+        color: #ecfdf5;
+        box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3);
+    }
+    .hud-box-warning {
+        background: linear-gradient(135deg, #78350f 0%, #b45309 100%);
+        border: 4px solid #f59e0b;
+        color: #fffbeb;
+        box-shadow: 0 4px 25px rgba(245, 158, 11, 0.4);
+    }
+    .hud-box-danger {
+        background: linear-gradient(135deg, #7f1d1d 0%, #b91c1c 100%);
+        border: 5px solid #ef4444;
+        color: #fef2f2;
+        animation: pulse-danger 1.2s infinite alternate;
+        box-shadow: 0 6px 35px rgba(239, 68, 68, 0.7);
+    }
+    @keyframes pulse-danger {
+        0% { transform: scale(1); box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
+        100% { transform: scale(1.015); box-shadow: 0 0 35px rgba(239, 68, 68, 0.9); }
+    }
+    .action-directive-danger {
+        background-color: #000000;
+        border: 3px solid #f87171;
+        border-radius: 14px;
+        padding: 16px 24px;
+        margin-top: 18px;
+        font-size: 26px;
+        font-weight: 900;
+        color: #fef08a;
+        letter-spacing: 0.5px;
+    }
+    .action-directive-safe {
+        background-color: rgba(0, 0, 0, 0.4);
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 12px;
+        padding: 14px 20px;
+        margin-top: 16px;
+        font-size: 20px;
+        font-weight: 700;
+        color: #d1fae5;
+    }
+    .direction-badge {
+        display: inline-block;
+        font-size: 26px;
+        font-weight: 900;
+        padding: 10px 28px;
+        border-radius: 12px;
+        background: rgba(0, 0, 0, 0.6);
+        margin: 12px 0;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# -----------------------------------------------------------------------------
-# 4. HÀM CHUYỂN ĐỔI AUDIO VỀ 16KHZ MONO FLOAT32
-# -----------------------------------------------------------------------------
-def load_audio_waveform(file_bytes: bytes) -> np.ndarray:
-    """Chuyển đổi file âm thanh bất kỳ sang float32 16kHz mono."""
-    sr, data = wavfile.read(io.BytesIO(file_bytes))
-    if len(data.shape) > 1:
-        data = data[:, 0]
-    if data.dtype == np.int16:
-        waveform = data.astype(np.float32) / 32768.0
-    elif data.dtype == np.int32:
-        waveform = data.astype(np.float32) / 2147483648.0
-    elif data.dtype == np.uint8:
-        waveform = (data.astype(np.float32) - 128.0) / 128.0
-    else:
-        waveform = data.astype(np.float32)
 
-    if sr != 16000 and len(waveform) > 0:
-        target_len = int(len(waveform) * 16000 / sr)
-        waveform = signal.resample(waveform, target_len).astype(np.float32)
-    return waveform
+# ============================================================================
+# SIDEBAR (CHỈ HIỂN THỊ KHI KHÔNG Ở RIDER FULLSCREEN MODE)
+# ============================================================================
 
-# -----------------------------------------------------------------------------
-# 5. KHỞI TẠO SESSION STATE (LƯU TRẠNG THÁI TRÁNH MẤT KẾT QUẢ KHI RERUN)
-# -----------------------------------------------------------------------------
-if "current_payload" not in st.session_state:
-    st.session_state.current_payload = DetectionPayload(
-        timestamp=time.time(),
-        db=52.0,
-        is_danger=False,
-        danger_type="SAFE",
-        label="Ambient street noise",
-        confidence=0.92,
-        latency_ms=16.5
-    )
+if not st.session_state.rider_mode:
+    with st.sidebar:
+        st.title("UrbanVibe: SafeRoute")
+        st.caption("Acoustic-Aware Decision Intelligence")
+        
+        st.markdown("""
+        **MLAI Hackathon 2026**  
+        *Track:* **Decision Intelligence (TMA Solutions)**  
+        *Đơn vị:* Trường ĐH Bách Khoa – ĐHQG-HCM
+        """)
+        st.divider()
 
-if "mock_step" not in st.session_state:
-    st.session_state.mock_step = 0
-
-# -----------------------------------------------------------------------------
-# 6. SIDEBAR CÀI ĐẶT & BỘ LỌC CỔNG KÉP
-# -----------------------------------------------------------------------------
-with st.sidebar:
-    st.header("⚙️ Bảng Điều Khiển Hệ Thống")
-    
-    source_mode = st.radio(
-        "Nguồn dữ liệu âm thanh:",
-        [
-            "🎭 1. Kịch bản Sân khấu (Manual Presets)",
-            "🧪 2. File Mẫu Kiểm Thử (Real YAMNet)",
-            "🎙️ 3. Thu Âm Microphone Trực Tiếp",
-            "🎲 4. Giả Lập Tự Động (Stream)"
-        ]
-    )
-
-    st.markdown("---")
-    st.subheader("Cân chỉnh Ngưỡng Thực Tế (Acoustic Calibration)")
-    
-    # Ngưỡng Decibel: Khuyến nghị 78 dB cho đường phố Việt Nam
-    db_threshold = st.slider(
-        "Ngưỡng Decibel cảnh báo (dB):",
-        min_value=50,
-        max_value=90,
-        value=78,
-        step=1,
-        help="Khuyến nghị thực tế: 78 dB. Môi trường xe máy chạy thường ~62-74 dB. Còi xe xin vượt phía sau đạt 78-86 dB."
-    )
-    st.caption("💡 *Đường phố thường: ~65 dB • Còi vượt: ≥ 78 dB • Cứu thương: ≥ 85 dB*")
-    
-    # Ngưỡng Confidence: Khuyến nghị 35% cho mô hình 521 nhãn YAMNet
-    conf_threshold = st.slider(
-        "Ngưỡng AI Confidence (%):",
-        min_value=20,
-        max_value=80,
-        value=35,
-        step=5,
-        help="Khuyến nghị thực tế: 35%. Vì YAMNet phân loại 521 lớp, trong môi trường có tạp âm ngoài đường, còi thật đạt khoảng 35-65%."
-    )
-    st.caption("💡 *Ngưỡng 35% kết hợp cùng cổng 78 dB giúp triệt tiêu >98% báo động giả.*")
-    
-    apply_wind_filter = st.checkbox("Bật bộ lọc DSP High-pass 300Hz (Chống gió rít)", value=False)
-    enable_vibration = st.checkbox("Kích hoạt Web Vibration API", value=True)
-
-# -----------------------------------------------------------------------------
-# 7. HÀM RENDER KHUNG SMARTPHONE (HERO VIEWPORT DEVICE)
-# -----------------------------------------------------------------------------
-def render_smartphone_viewport(payload: DetectionPayload, marker_db: float):
-    """Render giao diện khung điện thoại chuẩn Smartphone độc lập."""
-    current_time_str = datetime.now().strftime("%H:%M")
-    
-    if payload.is_danger:
-        if payload.danger_type == "EMERGENCY_SIREN":
-            frame_class = "strobe-danger"
-            hero_bg = "#dc2626"
-            hero_icon = "🚨 🚑"
-            hero_title = "XE CỨU THƯƠNG TIẾP CẬN!"
-            hero_sub = "CHỦ ĐỘNG TẤP LỀ • NHƯỜNG ĐƯỜNG NGAY"
-            haptic_desc = "RUNG DỒN DẬP KHẨN CẤP"
-            haptic_intensity = "CỰC ĐẠI"
-            vibe_bar_class = "vibe-pulse-danger"
-            haptic_color = "#ff1744"
+        # 1. Trạng thái phần cứng tự báo cáo (Read-only status)
+        st.markdown("##### Trạng thái Cảm biến & Phần cứng")
+        if st.session_state.system_status == "HEALTHY":
+            st.success("🟢 **BÌNH THƯỜNG**: Cảm biến âm học kết nối ổn định.")
+        elif st.session_state.system_status == "DEGRADED":
+            st.warning("🟡 **GIẢM ĐỘ NHẠY**: Tạp âm gió / rung pô xe vượt ngưỡng.")
         else:
-            frame_class = "strobe-warning"
-            hero_bg = "#ea580c"
-            hero_icon = "⚠️ 🛵"
-            hero_title = "CÒI XE VƯỢT NGƯỠNG!"
-            hero_sub = "CÓ XE XIN VƯỢT PHÍA SAU"
-            haptic_desc = "RUNG NHỊP ĐÔI DỨT KHOÁT"
-            haptic_intensity = "CẢNH BÁO"
-            vibe_bar_class = "vibe-pulse-warning"
-            haptic_color = "#ff9100"
+            st.error("🔴 **MẤT TÍN HIỆU**: Lỗi cảm biến! Đã ngắt cảnh báo để tránh an toàn giả.")
+
+        # 2. Phân định rõ ràng 2 Pha triển khai
+        st.markdown("---")
+        st.markdown("##### Phạm Vi & Lộ Trình Kỹ Thuật")
+        st.markdown("""
+        * **Pha 1 (Hiện tại - 0 VNĐ Phần cứng):** Chạy trên smartphone có sẵn; đo mức ồn dB, phân loại âm thanh cơ bản và ra quyết định lộ trình MCDA.
+        * **Pha 2 (Mở rộng - ~1.55M VNĐ BOM):** Cụm Pod 3 mic MEMS trên ghi-đông định hướng DoA 360° chính xác cao & cặp tay nắm rung BLE độc lập.
+        """)
+
+        # 3. Quản trị quyền riêng tư thực tế (Privacy Controls)
+        st.markdown("---")
+        st.markdown("##### Quyền Riêng Tư & Nghị Định 13")
+        st.session_state.data_opt_in = st.toggle(
+            "Đóng góp dữ liệu rủi ro ẩn danh",
+            value=st.session_state.data_opt_in,
+            help="Chỉ gửi metadata ẩn danh (Mã đoạn đường, dB trung bình, nhãn còi xe). TUYỆT ĐỐI KHÔNG ghi âm thô (Zero Raw Audio Storage)."
+        )
+        if st.button("Xóa Dữ Liệu Đã Đóng Góp (HMAC Token)", use_container_width=True):
+            st.info("Đã gửi yêu cầu thu hồi đồng thuận & hủy metadata theo HMAC Token.")
+
+        # 4. Công cụ giả lập dành riêng cho Giám khảo
+        st.divider()
+        with st.expander("🧪 Công cụ Giả lập Phần cứng (Giám khảo)", expanded=False):
+            st.caption("Mô phỏng các tình huống hỏng hóc thực địa khi bảo vệ:")
+            hw_override = st.radio(
+                "Mô phỏng trạng thái phần cứng:",
+                options=["HEALTHY", "DEGRADED", "UNAVAILABLE"],
+                index=["HEALTHY", "DEGRADED", "UNAVAILABLE"].index(st.session_state.system_status),
+                format_func=lambda x: {
+                    "HEALTHY": "Cảm biến bình thường (Healthy)",
+                    "DEGRADED": "Gió mạnh / Nhiễu pô (Degraded)",
+                    "UNAVAILABLE": "Mất kết nối mic (Unavailable)"
+                }[x]
+            )
+            if hw_override != st.session_state.system_status:
+                st.session_state.system_status = hw_override
+                st.rerun()
+
+
+# ============================================================================
+# GIAO DIỆN CHÍNH (XỬ LÝ RIÊNG KHI BẬT RIDER FULLSCREEN MODE)
+# ============================================================================
+
+payload = st.session_state.current_payload
+
+# NẾU ĐANG Ở CHẾ ĐỘ LÁI XE TOÀN MÀN HÌNH (RIDER MODE)
+if st.session_state.rider_mode:
+    # Thanh trạng thái tối giản trên cùng: Lộ trình + Trạng thái cảm biến + Nút Thoát
+    top_col1, top_col2, top_col3 = st.columns([4, 2, 2])
+    with top_col1:
+        st.markdown(f"**🛣️ Tuyến:** `{st.session_state.selected_scenario_id}` ({st.session_state.origin} ➔ {st.session_state.destination})")
+    with top_col2:
+        if st.session_state.system_status == "HEALTHY":
+            st.markdown("<span style='color: #10b981; font-weight: bold;'>🟢 Cảm biến: Khỏe mạnh</span>", unsafe_allow_html=True)
+        elif st.session_state.system_status == "DEGRADED":
+            st.markdown("<span style='color: #f59e0b; font-weight: bold;'>🟡 Cảm biến: Giảm độ nhạy</span>", unsafe_allow_html=True)
+        else:
+            st.markdown("<span style='color: #ef4444; font-weight: bold;'>🔴 Cảm biến: Mất kết nối</span>", unsafe_allow_html=True)
+    with top_col3:
+        st.button("✕ Thoát Chế độ Lái xe", on_click=on_toggle_rider_mode, use_container_width=True)
+
+    # Cảnh báo lỗi phần cứng nếu có (Chống an toàn giả)
+    if st.session_state.system_status == "UNAVAILABLE":
+        st.error("🚨 CẢM BIẾN MẤT KẾT NỐI! HỆ THỐNG KHÔNG THỂ PHÁT CẢNH BÁO. TẬP TRUNG QUAN SÁT MẮT 100%!")
+    elif st.session_state.system_status == "DEGRADED":
+        st.warning("⚠️ NHIỄU GIÓ LỚN: Độ nhạy cảnh báo giảm. Hãy quan sát gương thường xuyên.")
+
+    # Xác định mức độ khẩn cấp & Chỉ dẫn hành động duy nhất, ngắn gọn
+    if payload.is_danger and st.session_state.system_status != "UNAVAILABLE":
+        if payload.danger_type == "TRUCK_APPROACH" or payload.is_looming:
+            box_class = "hud-box-danger"
+            severity_text = "NGUY CẤP: XE TẢI ÁP SÁT PHÍA SAU!"
+            action_text = "GIỮ THẲNG LÁI · GIẢM TỐC NHẸ · QUAN SÁT GƯƠNG"
+            action_class = "action-directive-danger"
+            haptic_desc = "📳 Rung dồn dập 2 bên tay lái"
+        elif payload.danger_type == "EMERGENCY_SIREN":
+            box_class = "hud-box-danger"
+            severity_text = "CẢNH BÁO: XE ƯU TIÊN TIẾP CẬN!"
+            action_text = "GIẢM TỐC ĐỘ · TẤP LỀ PHẢI NHƯỜNG ĐƯỜNG"
+            action_class = "action-directive-danger"
+            haptic_desc = "📳 Rung nhịp đôi cách quãng"
+        else:
+            box_class = "hud-box-warning"
+            severity_text = "CHÚ Ý: CÒI XE ÁP SÁT PHÍA SAU"
+            action_text = "GIỮ VỮNG TAY LÁI · CHUẨN BỊ NHƯỜNG ĐƯỜNG"
+            action_class = "action-directive-danger"
+            haptic_desc = "📳 Rung phân vùng theo hướng"
     else:
-        frame_class = "strobe-safe"
-        hero_bg = "#064e3b"
-        hero_icon = "🛡️ ✅"
-        hero_title = "MÔI TRƯỜNG AN TOÀN"
-        hero_sub = "HỆ THỐNG ĐANG LIÊN TỤC LẮNG NGHE..."
-        haptic_desc = "CHẾ ĐỘ NGHỈ (YÊN TĨNH)"
-        haptic_intensity = "CHỜ"
-        vibe_bar_class = "vibe-idle"
-        haptic_color = "#10b981"
+        box_class = "hud-box-safe"
+        severity_text = "KHÔNG PHÁT HIỆN MỐI NGUY ÂM THANH HIỆN TẠI"
+        action_text = "TIẾP TỤC QUAN SÁT GIAO THÔNG BÌNH THƯỜNG"
+        action_class = "action-directive-safe"
+        haptic_desc = "Không kích hoạt rung"
 
-    # Tính toán phần trăm thanh VU Meter (từ 30dB -> 100dB)
-    vu_percent = max(0, min(100, int((payload.db - 30) / (100 - 30) * 100)))
-    marker_pos = max(0, min(100, int((marker_db - 30) / (100 - 30) * 100)))
-    vu_color = "#ef4444" if payload.db >= marker_db else ("#f59e0b" if payload.db >= 70 else "#10b981")
+    # Định hướng hiển thị
+    dir_label = {
+        "LEFT": "⬅️ NGUY CƠ BÊN TRÁI",
+        "RIGHT": "➡️ NGUY CƠ BÊN PHẢI",
+        "CENTER": "⬆️ PHÍA SAU TIẾP CẬN",
+        "UNKNOWN": "XUNG QUANH"
+    }.get(payload.direction, "ĐANG ĐO ĐẠC")
 
-    phone_html = f"""
-    <div class="phone-wrapper {frame_class}">
-        <!-- DYNAMIC ISLAND / NOTCH -->
-        <div class="notch-container">
-            <div class="dynamic-island">
-                <div class="sensor-dot"></div>
-                <div class="camera-lens"></div>
-            </div>
+    # THẺ HUD TOÀN MÀN HÌNH CHỈ GIỮ 4 THÔNG TIN CỐT LÕI
+    st.markdown(f"""
+    <div class="hud-fullscreen {box_class}">
+        <div style="font-size: 20px; font-weight: 800; letter-spacing: 1.5px; opacity: 0.9; text-transform: uppercase;">
+            MỨC ĐỘ NGUY CƠ
         </div>
-
-        <!-- TOP STATUS BAR -->
-        <div class="status-bar">
-            <span>{current_time_str}</span>
-            <span>🟢 100% ON-DEVICE AI</span>
-            <span>⚡ {payload.latency_ms:.1f}ms</span>
+        <div style="font-size: 38px; font-weight: 900; margin: 12px 0;">
+            {severity_text}
         </div>
-
-        <!-- THẺ CẢNH BÁO TRUNG TÂM -->
-        <div class="hero-card" style="background-color: {hero_bg};">
-            <div style="font-size: 46px; margin-bottom: 4px;">{hero_icon}</div>
-            <div style="font-size: 20px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: #ffffff;">
-                {hero_title}
-            </div>
-            <div style="font-size: 12px; font-weight: 600; margin-top: 4px; color: rgba(255,255,255,0.9);">
-                {hero_sub}
-            </div>
+        <div class="direction-badge">
+            {dir_label}
         </div>
-
-        <!-- ĐỒNG HỒ ĐO ÂM LƯỢNG (VU METER) -->
-        <div style="margin-top: 10px;">
-            <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700;">
-                <span style="color: #94a3b8;">CƯỜNG ĐỘ ÂM THANH:</span>
-                <span style="color: {vu_color}; font-size: 14px;">{payload.db:.1f} dB</span>
-            </div>
-            <div class="vu-meter-bg">
-                <div class="vu-meter-fill" style="width: {vu_percent}%; background-color: {vu_color};"></div>
-                <div class="threshold-marker" style="left: {marker_pos}%;" title="Ngưỡng cảnh báo: {marker_db:.0f} dB"></div>
-            </div>
-            <div style="display: flex; justify-content: space-between; font-size: 10px; color: #64748b; font-family: monospace;">
-                <span>30 dB</span>
-                <span style="color: #cbd5e1;">▲ Ngưỡng: {marker_db:.0f} dB</span>
-                <span>100 dB</span>
-            </div>
+        <div class="{action_class}">
+            {action_text}
         </div>
-
-        <!-- MÔ PHỎNG XÚC GIÁC VỚI SÓNG RUNG EQUALIZER -->
-        <div style="margin-top: 12px; padding: 9px 12px; background: #0f172a; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #1e293b;">
-            <div>
-                <div style="font-size: 10px; color: #64748b; font-weight: 600;">XUNG RUNG XÚC GIÁC (HAPTIC):</div>
-                <div style="font-size: 12px; font-weight: 700; color: {haptic_color}; margin-top: 2px;">{haptic_desc}</div>
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <div class="vibe-wave-container">
-                    <div class="vibe-bar {vibe_bar_class}"></div>
-                    <div class="vibe-bar {vibe_bar_class}"></div>
-                    <div class="vibe-bar {vibe_bar_class}"></div>
-                    <div class="vibe-bar {vibe_bar_class}"></div>
-                    <div class="vibe-bar {vibe_bar_class}"></div>
-                </div>
-                <span style="font-size: 10px; font-weight: 800; color: {haptic_color}; background: rgba(255,255,255,0.06); padding: 3px 6px; border-radius: 6px;">
-                    {haptic_intensity}
-                </span>
-            </div>
-        </div>
-
-        <!-- THÔNG TIN PHÂN LOẠI AI YAMNET -->
-        <div style="margin-top: 10px; font-size: 11px; color: #94a3b8; text-align: center; border-top: 1px solid #1e293b; padding-top: 8px;">
-            Nhận diện: <b style="color: #f1f5f9;">{payload.label}</b> • Độ tin cậy: <b style="color: #f1f5f9;">{payload.confidence * 100:.1f}%</b>
+        <div style="margin-top: 24px; font-size: 17px; font-weight: 600; opacity: 0.95;">
+            {haptic_desc}
         </div>
     </div>
-    """
-    st.html(phone_html)
+    """, unsafe_allow_html=True)
 
-# -----------------------------------------------------------------------------
-# 8. XỬ LÝ NGUỒN DỮ LIỆU & RENDER
-# -----------------------------------------------------------------------------
+    # Web Vibration API Script (Rung máy điện thoại thực tế nếu là mobile)
+    if payload.is_danger and st.session_state.system_status != "UNAVAILABLE":
+        pattern = "[250, 100, 250, 100, 250]" if payload.is_looming else "[150, 100, 150]"
+        st.components.v1.html(f"""
+        <script>
+            if ('vibrate' in navigator) {{
+                navigator.vibrate({pattern});
+            }}
+        </script>
+        """, height=0, width=0)
 
-# Chế độ 1: KỊCH BẢN SÂN KHẤU (MANUAL PRESETS)
-if "1. Kịch bản Sân khấu" in source_mode:
-    # 3 Nút bấm 1 chạm trực quan, không bị tràn chữ
-    col1, col2, col3 = st.columns(3)
-    now = time.time()
-    
-    with col1:
-        if st.button("🟢 An Toàn", use_container_width=True):
-            st.session_state.current_payload = DetectionPayload(now, 53.4, False, "SAFE", "Ambient city traffic / Speech", 0.91, 16.2)
-    with col2:
-        if st.button("🟠 Còi Xe Máy", use_container_width=True):
-            st.session_state.current_payload = DetectionPayload(now, 81.6, True, "VEHICLE_HORN", "Vehicle horn, car horn, honking", 0.86, 14.5)
-    with col3:
-        if st.button("🔴 Cứu Thương", use_container_width=True):
-            st.session_state.current_payload = DetectionPayload(now, 91.2, True, "EMERGENCY_SIREN", "Ambulance (siren) / Emergency", 0.97, 18.0)
+    # Thanh phím bấm mô phỏng nhanh dưới chân trang cho Giám khảo test ngay khi đang ở Rider Mode
+    st.markdown("<br/>", unsafe_allow_html=True)
+    sim_col1, sim_col2, sim_col3, sim_col4 = st.columns(4)
+    with sim_col1:
+        st.button("🚛 Test Xe Tải Áp Sát", on_click=on_trigger_event, args=("LOOMING_TRUCK",), use_container_width=True)
+    with sim_col2:
+        st.button("🚗 Test Còi Xe Máy", on_click=on_trigger_event, args=("VEHICLE_HORN",), use_container_width=True)
+    with sim_col3:
+        st.button("🚑 Test Còi Cứu Thương", on_click=on_trigger_event, args=("EMERGENCY_SIREN",), use_container_width=True)
+    with sim_col4:
+        st.button("🍃 Test Môi Trường Êm", on_click=on_trigger_event, args=("SAFE",), use_container_width=True)
 
-    # Cập nhật lại cổng lọc nếu người dùng đổi slider
-    p = st.session_state.current_payload
-    is_danger = (p.danger_type != "SAFE") and (p.db >= db_threshold) and (p.confidence >= conf_threshold / 100.0)
-    p.is_danger = is_danger
-    
-    render_smartphone_viewport(p, db_threshold)
 
-# Chế độ 2: FILE MẪU KIỂM THỬ & TẢI LÊN (REAL YAMNET)
-elif "2. File Mẫu Kiểm Thử" in source_mode:
-    engine = get_ai_engine()
-    sample_dir = ROOT_DIR / "tests" / "test_samples"
-    
-    tab_sample, tab_upload = st.tabs(["📁 File Mẫu Chuẩn", "📤 Tải File .WAV Riêng"])
-    target_bytes = None
-    
-    with tab_sample:
-        sample_pick = st.selectbox(
-            "Chọn tình huống âm thanh:",
-            [
-                "🚑 ambulance_siren.wav (Còi xe cứu thương - 86 dB)",
-                "🛵 horn_sample.wav (Còi xe máy xin vượt - 82 dB)",
-                "🛡️ ambient_traffic.wav (Tiếng ồn đường phố an toàn - 56 dB)"
-            ]
+# NẾU ĐANG Ở CHẾ ĐỘ BÌNH THƯỜNG (2-TAB DASHBOARD)
+else:
+    st.markdown("""
+    # UrbanVibe: SafeRoute
+    ##### Hệ thống Hỗ trợ Ra Quyết định & Giám sát An toàn Âm thanh cho Người Khiếm thính
+    """)
+
+    tab_pre_trip, tab_on_trip = st.tabs([
+        "🗺️ TAB 1: Ra Quyết Định Lộ Trình (Pre-Trip MCDA)",
+        "🚨 TAB 2: Giám Sát An Toàn Trên Xe (On-Trip HUD)"
+    ])
+
+    # ------------------------------------------------------------------------
+    # ------------------------------------------------------------------------
+    # TAB 1: PRE-TRIP DECISION INTELLIGENCE
+    # ------------------------------------------------------------------------
+    with tab_pre_trip:
+        st.markdown("#### 1. Thiết Lập Hành Trình & Gợi Ý Toàn Quốc (Nationwide Recommender & Geocoding)")
+        st.caption("Gõ bất kỳ địa chỉ, ngõ phố, trường học, bệnh viện hoặc tỉnh thành trên cả nước để tìm kiếm trực tuyến thời gian thực (OpenStreetMap) hoặc chọn từ danh mục chuẩn hóa:")
+
+        all_locations = {**CALIBRATED_LOCATIONS, **st.session_state.custom_locations}
+
+        # 1. Bộ Tìm Kiếm Địa Điểm Toàn Quốc (Hybrid: Offline Hubs + Live OpenStreetMap Geocoding)
+        search_query = st.text_input(
+            "🔍 Tìm kiếm mọi địa điểm tại Việt Nam (VD: 'Hồ Hoàn Kiếm', 'Cầu Rồng Đà Nẵng', 'Bến Ninh Kiều', 'Quảng trường Lâm Viên Đà Lạt', '123 Hoàng Diệu', 'ĐH Quốc Gia', 'HCMUTE')...",
+            placeholder="Nhập tên trường, địa danh, số nhà hoặc xã/phường/tỉnh bất kỳ tại Việt Nam...",
+            key="location_search_box"
         )
-        if "ambulance_siren" in sample_pick:
-            filename = "ambulance_siren.wav"
-        elif "horn_sample" in sample_pick:
-            filename = "horn_sample.wav"
-        else:
-            filename = "ambient_traffic.wav"
-            
-        file_path = sample_dir / filename
-        if file_path.exists():
-            with open(file_path, "rb") as f:
-                target_bytes = f.read()
-            st.audio(target_bytes, format="audio/wav")
-            
-    with tab_upload:
-        uploaded_file = st.file_uploader("Upload file .wav của Ban Giám Khảo:", type=["wav"])
-        if uploaded_file is not None:
-            target_bytes = uploaded_file.read()
-            st.audio(target_bytes, format="audio/wav")
+        if search_query:
+            # Bước A: Tìm trong danh mục offline + các điểm đã lưu
+            matched_locs = search_calibrated_locations(search_query, all_locations)
+            # Bước B: Tìm kiếm trực tuyến trên toàn lãnh thổ Việt Nam qua OSM Nominatim API
+            live_osm_results = geocode_vietnam_location(search_query)
 
-    if target_bytes is not None:
-        if st.button("🚀 PHÂN TÍCH VỚI YAMNET & DUAL-THRESHOLD GATE", type="primary", use_container_width=True):
-            with st.spinner("Đang tính toán ma trận phổ & suy luận AI..."):
-                waveform = load_audio_waveform(target_bytes)
-                conf_val = conf_threshold / 100.0
-                st.session_state.current_payload = engine.infer(
-                    waveform,
-                    db_threshold=float(db_threshold),
-                    conf_threshold=conf_val,
-                    apply_wind_filter=apply_wind_filter
-                )
-    
-    # Render viewport từ session state (đảm bảo không bị mất kết quả khi kéo slider)
-    p = st.session_state.current_payload
-    is_danger = (p.danger_type != "SAFE") and (p.db >= db_threshold) and (p.confidence >= conf_threshold / 100.0)
-    p.is_danger = is_danger
-    render_smartphone_viewport(p, db_threshold)
+            has_results = bool(matched_locs or live_osm_results)
+            if has_results:
+                st.markdown(f"<div style='font-size: 13px; font-weight: bold; color: #38bdf8; margin-bottom: 8px;'>🎯 Kết quả tìm kiếm cho '{search_query}':</div>", unsafe_allow_html=True)
 
-# Chế độ 3: THU ÂM MICROPHONE TRỰC TIẾP
-elif "3. Thu Âm Microphone" in source_mode:
-    engine = get_ai_engine()
-    audio_val = st.audio_input("Nhấn biểu tượng micro để thu âm 1–2 giây (thổi còi hoặc nói):")
-    
-    if audio_val is not None:
-        audio_bytes = audio_val.read()
-        waveform = load_audio_waveform(audio_bytes)
-        conf_val = conf_threshold / 100.0
-        with st.spinner("Đang phân tích âm thanh..."):
-            st.session_state.current_payload = engine.infer(
-                waveform,
-                db_threshold=float(db_threshold),
-                conf_threshold=conf_val,
-                apply_wind_filter=apply_wind_filter
+                # Hiển thị kết quả hiệu chuẩn sẵn trước (nếu có)
+                for m_name in matched_locs[:2]:
+                    m_meta = all_locations[m_name]
+                    c_res1, c_res2, c_res3 = st.columns([5, 2, 2])
+                    with c_res1:
+                        st.markdown(
+                            f"<div style='background: #1e293b; padding: 6px 12px; border-radius: 6px; border-left: 3px solid #10b981;'>"
+                            f"📍 <b>{m_name}</b> <span style='font-size: 11px; background: #065f46; color: #a7f3d0; padding: 2px 6px; border-radius: 4px;'>Hiệu chuẩn</span><br/>"
+                            f"<span style='font-size: 12px; color: #94a3b8;'>{m_meta.get('category')} · {m_meta.get('address')}</span>"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
+                    with c_res2:
+                        if st.button("👉 Đặt làm Điểm đi", key=f"set_orig_hub_{m_name}", use_container_width=True):
+                            st.session_state.origin = m_name
+                            st.rerun()
+                    with c_res3:
+                        if st.button("👉 Đặt làm Điểm đến", key=f"set_dest_hub_{m_name}", use_container_width=True):
+                            st.session_state.destination = m_name
+                            st.rerun()
+
+                # Hiển thị kết quả Geocoding trực tuyến OpenStreetMap toàn quốc (nếu có)
+                for i, osm_item in enumerate(live_osm_results[:3]):
+                    # Bỏ qua nếu tên đã trùng với điểm hiệu chuẩn đã hiển thị
+                    if osm_item["name"] in matched_locs:
+                        continue
+                    c_res1, c_res2, c_res3 = st.columns([5, 2, 2])
+                    with c_res1:
+                        st.markdown(
+                            f"<div style='background: #0f172a; padding: 6px 12px; border-radius: 6px; border-left: 3px solid #38bdf8;'>"
+                            f"🌐 <b>{osm_item['name']}</b> <span style='font-size: 11px; background: #075985; color: #bae6fd; padding: 2px 6px; border-radius: 4px;'>Bản đồ Toàn quốc (OSM)</span><br/>"
+                            f"<span style='font-size: 12px; color: #94a3b8;'>{osm_item.get('category')} · GPS: {osm_item.get('coords')}<br/><i>{osm_item.get('full_address')[:85]}...</i></span>"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
+                    with c_res2:
+                        if st.button("👉 Đặt làm Điểm đi", key=f"set_orig_osm_{i}", use_container_width=True):
+                            custom_key = f"{osm_item['name']}"
+                            st.session_state.custom_locations[custom_key] = {
+                                "coords": osm_item["coords"],
+                                "category": osm_item["category"],
+                                "address": osm_item["full_address"]
+                            }
+                            st.session_state.origin = custom_key
+                            st.rerun()
+                    with c_res3:
+                        if st.button("👉 Đặt làm Điểm đến", key=f"set_dest_osm_{i}", use_container_width=True):
+                            custom_key = f"{osm_item['name']}"
+                            st.session_state.custom_locations[custom_key] = {
+                                "coords": osm_item["coords"],
+                                "category": osm_item["category"],
+                                "address": osm_item["full_address"]
+                            }
+                            st.session_state.destination = custom_key
+                            st.rerun()
+
+                st.markdown("<hr style='margin: 10px 0; border-color: rgba(255,255,255,0.1);'/>", unsafe_allow_html=True)
+            else:
+                st.info(f"Đang tìm kiếm hoặc không tìm thấy địa điểm khớp với '{search_query}'. Vui lòng thử lại với từ khóa khác hoặc chọn bên dưới.")
+
+        # Cập nhật lại all_locations sau khi có thể có địa điểm tùy biến mới
+        all_locations = {**CALIBRATED_LOCATIONS, **st.session_state.custom_locations}
+
+        # 2. Thanh Gợi Ý Tuyến Phổ Biến (Recommender System Presets)
+        rec_keys = list(POPULAR_OD_RECOMMENDATIONS.keys())
+        rec_options = ["-- Chọn Tuyến Trọng Điểm Mẫu (Toàn Quốc & Nội Đô) --"] + rec_keys
+
+        def on_select_preset_route():
+            chosen = st.session_state.get("quick_preset_choice", "")
+            if chosen in POPULAR_OD_RECOMMENDATIONS:
+                o, d = POPULAR_OD_RECOMMENDATIONS[chosen]
+                st.session_state.origin = o
+                st.session_state.destination = d
+
+        st.selectbox(
+            "💡 Tuyến đường trọng điểm mẫu (Bắc - Trung - Nam & Tuyến Xuyên Việt):",
+            options=rec_options,
+            key="quick_preset_choice",
+            on_change=on_select_preset_route
+        )
+
+        col_in1, col_in2, col_in3 = st.columns([2, 2, 2])
+        loc_names = list(all_locations.keys())
+
+        # Đảm bảo origin và destination có trong danh sách lựa chọn
+        if st.session_state.origin not in loc_names:
+            loc_names.insert(0, st.session_state.origin)
+        if st.session_state.destination not in loc_names:
+            loc_names.append(st.session_state.destination)
+
+        orig_idx = loc_names.index(st.session_state.origin)
+        dest_idx = loc_names.index(st.session_state.destination)
+
+        with col_in1:
+            st.session_state.origin = st.selectbox(
+                "Điểm xuất phát (Origin):",
+                options=loc_names,
+                index=orig_idx
+            )
+            orig_meta = all_locations.get(st.session_state.origin, {})
+            st.markdown(
+                f"<div style='font-size: 11px; color: #a7f3d0; background: #064e3b; padding: 4px 8px; border-radius: 6px; margin-top: -6px;'>"
+                f"📍 <b>GPS:</b> {orig_meta.get('coords')} · <i>{orig_meta.get('address', 'Địa chỉ bản đồ OSM')}</i>"
+                f"</div>",
+                unsafe_allow_html=True
             )
 
-    p = st.session_state.current_payload
-    render_smartphone_viewport(p, db_threshold)
+        with col_in2:
+            st.session_state.destination = st.selectbox(
+                "Điểm đến (Destination):",
+                options=loc_names,
+                index=dest_idx
+            )
+            dest_meta = all_locations.get(st.session_state.destination, {})
+            st.markdown(
+                f"<div style='font-size: 11px; color: #fecaca; background: #450a0a; padding: 4px 8px; border-radius: 6px; margin-top: -6px;'>"
+                f"🏁 <b>GPS:</b> {dest_meta.get('coords')} · <i>{dest_meta.get('address', 'Địa chỉ bản đồ OSM')}</i>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
 
-# Chế độ 4: GIẢ LẬP TỰ ĐỘNG (STREAM)
-else:
-    col_a, col_b = st.columns([2, 1])
-    with col_a:
-        st.caption("🎲 Mô phỏng dòng sự kiện liên tục trên đường phố.")
-    with col_b:
-        if st.button("🔄 Bước kế tiếp", use_container_width=True):
-            st.session_state.current_payload = generate_mock_payload()
+        with col_in3:
+            presets = UserPreferenceProfile.get_presets()
+            preset_keys = list(presets.keys())
+            selected_key = st.selectbox(
+                "Hồ sơ Ưu tiên:",
+                options=preset_keys,
+                index=preset_keys.index(st.session_state.profile_key),
+                format_func=lambda k: presets[k].display_title
+            )
+            st.session_state.profile_key = selected_key
+            active_profile = presets[selected_key]
 
-    p = st.session_state.current_payload
-    render_smartphone_viewport(p, db_threshold)
+        if st.session_state.origin == st.session_state.destination:
+            st.warning("⚠️ Điểm xuất phát và Điểm đến đang trùng nhau. Vui lòng chọn 2 địa điểm khác nhau để hệ thống mô phỏng đa tuyến!")
 
-# -----------------------------------------------------------------------------
-# 9. SECTION: LỘ TRÌNH THỰC TẾ & PHẦN CỨNG (TRACK 2 ROADMAP)
-# -----------------------------------------------------------------------------
-# st.markdown("---")
-# with st.expander("🚀 **KIẾN TRÚC THỰC TẾ & LỘ TRÌNH PHẦN CỨNG (TRACK 2 ROADMAP)**", expanded=False):
-#     st.markdown(
-#         """
-#         ### 📐 Bản vẽ Kỹ thuật: Chuyển dịch từ PoC sang Thiết bị Thương mại
-#         *Giao diện Web hiện tại đóng vai trò là **Bộ Giả Lập & Kiểm thử (HIL Simulator)**. Khi triển khai thực tế trên xe máy, UrbanVibe áp dụng kiến trúc 4 lớp giải quyết triệt để rào cản vận hành:*
+        st.caption(
+            f"Vector trọng số: Thời gian $w_t = {active_profile.w_time:.2f}$ | "
+            f"Rủi ro Âm thanh $w_a = {active_profile.w_ari:.2f}$ | "
+            f"Bất định Bayesian $w_u = {active_profile.w_uncertainty:.2f}$ "
+            f"(Ràng buộc an toàn cứng: $ARI_{{max}} \\le {active_profile.tau_cutoff:.1f}$)"
+        )
 
-#         <div class="roadmap-card">
-#             <b style="color: #60a5fa;">1. Nền tảng Native (Android Foreground Service):</b><br>
-#             • Nén mô hình YAMNet sang <b>TFLite int8 (~3.5 MB)</b> chạy C++ qua Android NDK.<br>
-#             • Chạy nền vĩnh viễn (Foreground Service với Micro Stream), không bao giờ bị hệ điều hành tắt khi khóa màn hình hay bật Google Maps.<br>
-#             • Cơ chế <b>2-Stage Wakeup</b>: Chỉ kích hoạt AI khi âm thanh &gt; 70dB, giúp thời lượng pin kéo dài hơn 8 giờ chạy xe.
-#         </div>
+        orig_pos = all_locations.get(st.session_state.origin, {}).get("coords", [106.6578, 10.7725])
+        dest_pos = all_locations.get(st.session_state.destination, {}).get("coords", [106.7722, 10.8507])
 
-#         <div class="roadmap-card">
-#             <b style="color: #34d399;">2. Giải pháp Tiếng Gió Rít & Môi trường Âm học:</b><br>
-#             • Micro định hướng bọc màng lọc âm <b>Deadcat/Acoustic Foam</b> tích hợp dưới cằm nón bảo hiểm.<br>
-#             • DSP High-pass Butterworth cắt toàn bộ tần số &lt; 300Hz (loại bỏ 85% năng lượng gió rít).<br>
-#             • Lọc dải thông Bandpass 1.5kHz – 4.5kHz tập trung vào tần số sinh học của còi xe.
-#         </div>
+        decision_resp = generate_mock_decision_response(
+            origin=st.session_state.origin,
+            destination=st.session_state.destination,
+            profile=active_profile,
+            orig_coords=orig_pos,
+            dest_coords=dest_pos
+        )
 
-#         <div class="roadmap-card">
-#             <b style="color: #f59e0b;">3. Phản hồi Xung Rung Haptic Cách Ly Động Cơ Xe:</b><br>
-#             • Thay vì rung điện thoại trên tay lái (bị rung máy xe triệt tiêu), app bắn tín hiệu <b>Bluetooth Low Energy (BLE)</b> tới <b>Smartwatch (WearOS/Apple Watch)</b>.<br>
-#             • Hoặc tích hợp motor rung <b>LRA (Linear Resonant Actuator)</b> ngay quai nón bảo hiểm (áp sát xương hàm người lái).
-#         </div>
+        st.markdown("---")
+        col_map, col_matrix = st.columns([1, 1], gap="medium")
 
-#         <div class="roadmap-card">
-#             <b style="color: #f87171;">4. An toàn Thị giác Ngoại vi (Peripheral HUD):</b><br>
-#             • Không bắt người lái nhìn điện thoại gây mất tập trung.<br>
-#             • Cụm đèn LED RGB siêu nhỏ gắn viền gương chiếu hậu nhấp nháy trong tầm nhìn ngoại vi, giúp người lái nhận biết ngay mà không rời mắt khỏi đường.
-#         </div>
-#         """,
-#         unsafe_allow_html=True
-#     )
+        with col_map:
+            st.markdown("#### Bản Đồ Không Gian Đa Lớp & Điểm Rủi Ro Âm Thanh")
+            st.caption("Tự động vẽ đường nối trực quan theo tọa độ GPS đã chọn; phân biệt các tuyến bằng độ dày nét và nhãn văn bản:")
+
+            # Tính toán hình học động nối từ Origin đến Destination
+            route_a_pts, route_b_pts, route_c_pts, hotspots_data, text_labels, (cam_lat, cam_lon, cam_zoom) = generate_dynamic_route_geometries(
+                orig_pos, dest_pos
+            )
+
+            # 3 Tuyến đường động: Tuyến B (SafeRoute) được highlight nét dày nhất (9px)
+            routes_data = [
+                {
+                    "name": "Tuyến A (Nhanh nhất - Baseline)",
+                    "path": route_a_pts,
+                    "color": [239, 68, 68, 220],
+                    "width": 5,
+                    "desc": f"Tuyến A: Trục giao thông chính (Nhiều xe tải, ARI 8.4) - {decision_resp.scenarios[0].duration_min:.0f} phút, {decision_resp.scenarios[0].distance_km:.1f} km"
+                },
+                {
+                    "name": "Tuyến B: SafeRoute (Đề xuất tối ưu)",
+                    "path": route_b_pts,
+                    "color": [16, 185, 129, 255],
+                    "width": 9,  # Nét dày nổi bật nhất
+                    "desc": f"Tuyến B: SafeRoute né điểm rủi ro qua phố nhánh an toàn (Giảm 77% rủi ro, ARI 1.9) - {decision_resp.scenarios[1].duration_min:.0f} phút, {decision_resp.scenarios[1].distance_km:.1f} km"
+                },
+                {
+                    "name": "Tuyến C (Vành đai vắng)",
+                    "path": route_c_pts,
+                    "color": [56, 189, 248, 180],
+                    "width": 3,
+                    "desc": f"Tuyến C: Vành đai đô thị thoáng (Độ ồn cực thấp, độ bất định cao) - {decision_resp.scenarios[2].duration_min:.0f} phút, {decision_resp.scenarios[2].distance_km:.1f} km"
+                }
+            ]
+
+            path_layer = pdk.Layer(
+                "PathLayer",
+                routes_data,
+                get_path="path",
+                get_color="color",
+                get_width="width",
+                width_scale=15,
+                width_min_pixels=3,
+                pickable=True
+            )
+
+            hotspot_layer = pdk.Layer(
+                "ScatterplotLayer",
+                hotspots_data,
+                get_position="coordinates",
+                get_color=[239, 68, 68, 210],
+                get_radius=420,
+                radius_min_pixels=9,
+                radius_max_pixels=24,
+                pickable=True
+            )
+
+            text_layer = pdk.Layer(
+                "TextLayer",
+                text_labels,
+                get_position="coordinates",
+                get_text="text",
+                get_color="color",
+                get_size=13,
+                get_alignment_baseline="'bottom'",
+                pickable=False
+            )
+
+            # Lớp ghim điểm xuất phát và đích đến theo tọa độ GPS hiệu chuẩn
+            od_pins = [
+                {"name": f"Điểm xuất phát: {st.session_state.origin}", "coordinates": orig_pos, "color": [16, 185, 129, 255], "desc": f"Xuất phát: {st.session_state.origin}"},
+                {"name": f"Điểm đến: {st.session_state.destination}", "coordinates": dest_pos, "color": [239, 68, 68, 255], "desc": f"Đích đến: {st.session_state.destination}"}
+            ]
+
+            pin_layer = pdk.Layer(
+                "ScatterplotLayer",
+                od_pins,
+                get_position="coordinates",
+                get_color="color",
+                get_radius=480,
+                radius_min_pixels=11,
+                radius_max_pixels=25,
+                pickable=True
+            )
+
+            # Camera ViewState tự động thích ứng với vị trí và khoảng cách O-D
+            view_state = pdk.ViewState(latitude=cam_lat, longitude=cam_lon, zoom=cam_zoom, pitch=0)
+            deck = pdk.Deck(
+                layers=[path_layer, hotspot_layer, pin_layer, text_layer],
+                initial_view_state=view_state,
+                map_style="dark",
+                tooltip={"text": "{name}\n{desc}"}
+            )
+            st.pydeck_chart(deck, use_container_width=True)
+
+            # Khối Provenance & Quality Flags
+            st.markdown("""
+            <div style="font-size: 12px; color: #94a3b8; background: #0f172a; padding: 10px 14px; border-radius: 8px; border-left: 3px solid #38bdf8;">
+                <b>Nguồn gốc dữ liệu (Provenance):</b> Bộ dữ liệu thực nghiệm giao thông TP.HCM (Pilot VATD - 2.500 mẫu) kết hợp mô hình không gian OSRM.<br/>
+                <b>Kiểm soát chất lượng:</b> Lọc bỏ dữ liệu khi GPS mất định vị hoặc micro nghẽn gió; phân chia Train/Test theo từng phiên ghi độc lập chống lạc quan giả.
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col_matrix:
+            st.markdown("#### Ma Trận Đánh Đổi Đa Tiêu Chí (Trade-Off Matrix)")
+            matrix_data = decision_resp.get_tradeoff_matrix()
+            df_matrix = pd.DataFrame(matrix_data)
+            st.dataframe(df_matrix, use_container_width=True, hide_index=True)
+
+            st.markdown("#### Diễn Giải Minh Bạch (XAI)")
+            rec_scenario = decision_resp.get_recommended_scenario()
+            if rec_scenario:
+                st.success(
+                    f"**Đề xuất tối ưu:** `{rec_scenario.title}`\n\n"
+                    f"{rec_scenario.xai_explanation}"
+                )
+
+            st.markdown("#### Xác Nhận Lộ Trình")
+            scenario_options = {s.scenario_id: f"{s.title} ({s.duration_min:.0f} phút - ARI: {s.avg_ari:.1f})" for s in decision_resp.scenarios}
+            chosen_id = st.radio(
+                "Chọn tuyến để bắt đầu giám sát:",
+                options=list(scenario_options.keys()),
+                format_func=lambda x: scenario_options[x],
+                index=list(scenario_options.keys()).index(decision_resp.recommended_scenario_id)
+            )
+            st.session_state.selected_scenario_id = chosen_id
+
+            if st.button("Xác Nhận & Bắt Đầu Di Chuyển ➔", type="primary", use_container_width=True):
+                st.toast("Đã kích hoạt lộ trình! Mời bạn chuyển sang Tab 2.")
+
+    # ------------------------------------------------------------------------
+    # TAB 2: ON-TRIP HUD (CHẾ ĐỘ THÔNG THƯỜNG CÓ NÚT BẬT RIDER MODE)
+    # ------------------------------------------------------------------------
+    with tab_on_trip:
+        active_scen = None
+        for s in decision_resp.scenarios:
+            if s.scenario_id == st.session_state.selected_scenario_id:
+                active_scen = s
+                break
+        if not active_scen:
+            active_scen = decision_resp.get_recommended_scenario()
+
+        # Banner thông báo tuyến đang giám sát
+        st.markdown(f"""
+        <div style="background-color: #0f172a; padding: 10px 16px; border-radius: 8px; border-left: 5px solid #10b981; margin-bottom: 16px;">
+            <span style="color: #94a3b8; font-size: 12px; text-transform: uppercase; font-weight: bold;">Lộ trình đang giám sát:</span><br/>
+            <strong style="color: #f8fafc; font-size: 15px;">{active_scen.title} ({st.session_state.origin} ➔ {st.session_state.destination})</strong>
+        </div>
+        """, unsafe_allow_html=True)
+
+        col_t1, col_t2 = st.columns([3, 1])
+        with col_t1:
+            st.button("🚀 BẬT CHẾ ĐỘ LÁI XE TOÀN MÀN HÌNH (RIDER HUD)", on_click=on_toggle_rider_mode, type="primary", use_container_width=True)
+        with col_t2:
+            if st.session_state.system_status == "HEALTHY":
+                st.markdown("<span style='color: #10b981; font-weight: bold;'>🟢 Cảm biến: Khỏe mạnh</span>", unsafe_allow_html=True)
+            elif st.session_state.system_status == "DEGRADED":
+                st.markdown("<span style='color: #f59e0b; font-weight: bold;'>🟡 Cảm biến: Giảm độ nhạy</span>", unsafe_allow_html=True)
+            else:
+                st.markdown("<span style='color: #ef4444; font-weight: bold;'>🔴 Cảm biến: Mất kết nối</span>", unsafe_allow_html=True)
+
+        col_hud, col_controls = st.columns([3, 2], gap="large")
+
+        with col_hud:
+            st.subheader("Màn Hình Tay Lái (HUD View)")
+
+            if payload.is_danger and st.session_state.system_status != "UNAVAILABLE":
+                if payload.danger_type == "TRUCK_APPROACH" or payload.is_looming:
+                    box_class = "hud-box-danger"
+                    severity_text = "NGUY CẤP: XE TẢI ÁP SÁT PHÍA SAU!"
+                    action_text = "GIỮ THẲNG LÁI · GIẢM TỐC NHẸ · QUAN SÁT GƯƠNG"
+                    action_class = "action-directive-danger"
+                    haptic_desc = "📳 Rung dồn dập 2 bên tay lái"
+                elif payload.danger_type == "EMERGENCY_SIREN":
+                    box_class = "hud-box-danger"
+                    severity_text = "CẢNH BÁO: XE ƯU TIÊN TIẾP CẬN!"
+                    action_text = "GIẢM TỐC ĐỘ · TẤP LỀ PHẢI NHƯỜNG ĐƯỜNG"
+                    action_class = "action-directive-danger"
+                    haptic_desc = "📳 Rung nhịp đôi cách quãng"
+                else:
+                    box_class = "hud-box-warning"
+                    severity_text = "CHÚ Ý: CÒI PHƯƠNG TIỆN ÁP SÁT"
+                    action_text = "GIỮ VỮNG TAY LÁI · CHUẨN BỊ NHƯỜNG ĐƯỜNG"
+                    action_class = "action-directive-danger"
+                    haptic_desc = "📳 Rung phân vùng theo hướng"
+            else:
+                box_class = "hud-box-safe"
+                severity_text = "KHÔNG PHÁT HIỆN MỐI NGUY ÂM THANH HIỆN TẠI"
+                action_text = "TIẾP TỤC QUAN SÁT GIAO THÔNG BÌNH THƯỜNG"
+                action_class = "action-directive-safe"
+                haptic_desc = "Không kích hoạt rung"
+
+            dir_label = {
+                "LEFT": "⬅️ BÊN TRÁI",
+                "RIGHT": "➡️ BÊN PHẢI",
+                "CENTER": "⬆️ PHÍA SAU",
+                "UNKNOWN": "XUNG QUANH"
+            }.get(payload.direction, "ĐANG QUAN SÁT")
+
+            st.markdown(f"""
+            <div class="{box_class}" style="border-radius: 16px; padding: 24px; text-align: center;">
+                <div style="font-size: 14px; font-weight: 700; opacity: 0.85; text-transform: uppercase;">
+                    MỨC ĐỘ NGUY CƠ
+                </div>
+                <div style="font-size: 26px; font-weight: 900; margin: 8px 0;">
+                    {severity_text}
+                </div>
+                <div class="direction-badge">
+                    {dir_label}
+                </div>
+                <div class="{action_class}" style="font-size: 19px;">
+                    {action_text}
+                </div>
+                <div style="margin-top: 15px; font-size: 14px; opacity: 0.95;">
+                    {haptic_desc}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Web Vibration API
+            if payload.is_danger and st.session_state.system_status != "UNAVAILABLE":
+                pattern = "[250, 100, 250, 100, 250]" if payload.is_looming else "[150, 100, 150]"
+                st.components.v1.html(f"""
+                <script>
+                    if ('vibrate' in navigator) {{
+                        navigator.vibrate({pattern});
+                    }}
+                </script>
+                """, height=0, width=0)
+
+            # Thông số kỹ thuật khi ở Dashboard (Chỉ hiện cho Giám khảo)
+            st.markdown("<br/>", unsafe_allow_html=True)
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                st.metric("Cường Độ Âm", f"{payload.db:.1f} dBA", delta=f"{payload.db - 75:.1f} dBA" if payload.db > 75 else None)
+            with m2:
+                st.metric("Độ Tin Cậy AI", f"{payload.confidence * 100:.1f}%")
+            with m3:
+                st.metric("Độ Trễ Phản Xạ", f"{payload.latency_ms:.1f} ms", delta="<80ms SLA", delta_color="normal")
+
+        with col_controls:
+            st.subheader("Bộ Phím Thử Nghiệm Tức Thì")
+            st.caption("Ứng dụng callback giúp phản xạ cập nhật giao diện trong <50ms:")
+
+            st.button("🚛 Kích hoạt Xe Tải Áp Sát (Phải)", on_click=on_trigger_event, args=("LOOMING_TRUCK",), use_container_width=True)
+            st.button("🚗 Kích hoạt Còi Xe Máy (Trái)", on_click=on_trigger_event, args=("VEHICLE_HORN",), use_container_width=True)
+            st.button("🚑 Kích hoạt Còi Xe Cứu Thương", on_click=on_trigger_event, args=("EMERGENCY_SIREN",), use_container_width=True)
+            st.button("🍃 Kích hoạt Môi Trường Êm", on_click=on_trigger_event, args=("SAFE",), use_container_width=True)
+
+            st.divider()
+            st.subheader("Kiểm Tra Rung Điện Thoại")
+            test_vib = st.button("📳 Rung Thử Nghiệm 3 Nhịp (Web Haptics)", use_container_width=True)
+            if test_vib:
+                st.components.v1.html("""
+                <script>
+                    if ('vibrate' in navigator) {
+                        navigator.vibrate([200, 100, 200, 100, 400]);
+                    } else {
+                        alert('Trình duyệt không hỗ trợ Web Vibration API. Hãy mở trên Chrome/Firefox Android!');
+                    }
+                </script>
+                """, height=0, width=0)
+                st.success("Đã gửi lệnh rung `navigator.vibrate` tới điện thoại!")

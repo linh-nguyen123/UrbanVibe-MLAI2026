@@ -12,8 +12,10 @@ ENV/
 
 # Model weights & Large audio
 *.wav
+!tests/test_samples/*.wav
 *.mp3
 *.tflite
+!engine/models/*.tflite
 *.tar.gz
 
 # IDE
