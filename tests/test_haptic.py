@@ -1,7 +1,3 @@
-"""
-Unit tests for UrbanVibe Haptic Controller (Web Vibration API & Serial Driver).
-"""
-
 import sys
 from pathlib import Path
 import unittest
@@ -29,7 +25,6 @@ class TestHapticController(unittest.TestCase):
         self.assertIn("navigator.vibrate(0)", js)
 
     def test_serial_driver_fallback(self):
-        # Without valid port, driver should gracefully fallback without crashing
         driver = SerialHapticDriver(port=None)
         self.assertIsNone(driver.connection)
         self.assertFalse(driver.trigger("VEHICLE_HORN"))
@@ -41,19 +36,13 @@ class TestHapticController(unittest.TestCase):
         mock_conn.is_open = True
         driver.connection = mock_conn
 
-        # Test VEHICLE_HORN command
-        success = driver.trigger("VEHICLE_HORN")
-        self.assertTrue(success)
+        self.assertTrue(driver.trigger("VEHICLE_HORN"))
         mock_conn.write.assert_called_with(b"H\n")
 
-        # Test EMERGENCY_SIREN command
-        success = driver.trigger("EMERGENCY_SIREN")
-        self.assertTrue(success)
+        self.assertTrue(driver.trigger("EMERGENCY_SIREN"))
         mock_conn.write.assert_called_with(b"S\n")
 
-        # Test SAFE command
-        success = driver.trigger("SAFE")
-        self.assertTrue(success)
+        self.assertTrue(driver.trigger("SAFE"))
         mock_conn.write.assert_called_with(b"0\n")
 
         driver.close()

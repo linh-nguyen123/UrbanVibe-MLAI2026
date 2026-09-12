@@ -1,16 +1,15 @@
-import time
 from dataclasses import dataclass, asdict, field
 from typing import List, Dict, Any, Optional
 
 @dataclass
 class DetectionPayload:
-    timestamp: float        # Thời gian epoch ghi nhận
-    db: float               # Cường độ âm thanh Decibel SPL
-    is_danger: bool         # True nếu có nguy cơ vượt ngưỡng
-    danger_type: str        # 'SAFE' | 'VEHICLE_HORN' | 'EMERGENCY_SIREN'
-    label: str              # Nhãn nhận diện chi tiết từ mô hình YAMNet
-    confidence: float       # Độ tin cậy (0.0 -> 1.0)
-    latency_ms: float       # Độ trễ suy luận của frame (ms)
+    timestamp: float
+    db: float
+    is_danger: bool
+    danger_type: str
+    label: str
+    confidence: float
+    latency_ms: float
 
     def to_dict(self):
         return asdict(self)
@@ -18,22 +17,19 @@ class DetectionPayload:
 
 @dataclass
 class RouteScenario:
-    """
-    Kịch bản lộ trình giao thông cho hệ thống hỗ trợ ra quyết định (Pre-Trip MCDA).
-    """
-    route_id: str                      # Mã nhận diện tuyến (vd: 'ROUTE_A', 'ROUTE_B')
-    name: str                          # Tên mô tả lộ trình (vd: 'Tuyến A - Trục Đại Lộ')
-    time_min: float                    # Thời gian di chuyển ước tính (T, phút)
-    distance_km: float                 # Khoảng cách lộ trình (D, km)
-    ari_mean: float                    # Rủi ro âm thanh trung bình (ARI_bar, thang 0..10)
-    ari_p90: float                     # Rủi ro bách phân vị thứ 90 theo độ dài (ARI_P90, thang 0..10)
-    uncertainty: float                 # Độ bất định Bayesian (U, thang 0..1)
-    truck_density: float               # Mật độ xe tải (0.0 -> 1.0)
-    xai_explanation: str = ""          # Diễn giải minh bạch lý do đánh đổi (XAI)
-    is_recommended: bool = False       # Cờ đánh dấu tuyến tối ưu đề xuất
-    ari_max: float = 0.0               # Rủi ro đỉnh phân đoạn lớn nhất (dùng cho ràng buộc cứng tau_cutoff)
-    n_trips: int = 0                   # Số chuyến đi thực tế đã ghi nhận trên tuyến
-    mcda_score: float = 0.0            # Điểm hàm chi phí tổng hợp C(P)
+    route_id: str
+    name: str
+    time_min: float
+    distance_km: float
+    ari_mean: float
+    ari_p90: float
+    uncertainty: float
+    truck_density: float
+    xai_explanation: str = ""
+    is_recommended: bool = False
+    ari_max: float = 0.0
+    n_trips: int = 0
+    mcda_score: float = 0.0
 
     @property
     def duration_min(self) -> float:
@@ -45,10 +41,6 @@ class RouteScenario:
 
 @dataclass
 class UserPreferenceProfile:
-    """
-    Cấu hình sở thích và vector trọng số người dùng: W = [w_time, w_ari, w_uncert].
-    Ràng buộc toán học: w_time, w_ari, w_uncert >= 0 và w_time + w_ari + w_uncert = 1.0.
-    """
     name: str = "BALANCED"
     w_time: float = 0.4
     w_ari: float = 0.4
@@ -95,9 +87,6 @@ class UserPreferenceProfile:
 
 @dataclass
 class DecisionResponse:
-    """
-    Kết quả phản hồi từ Decision Engine cho Pre-Trip Planning.
-    """
     pareto_scenarios: List[RouteScenario]
     recommended_scenario: Optional[RouteScenario]
     tradeoff_metadata: Dict[str, Any]
