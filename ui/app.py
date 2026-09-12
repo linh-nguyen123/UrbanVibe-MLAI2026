@@ -71,26 +71,34 @@ if "rider_mode" not in st.session_state:
 if "data_opt_in" not in st.session_state:
     st.session_state.data_opt_in = True  # Quyền riêng tư Opt-in
 
+if "custom_locations" not in st.session_state:
+    st.session_state.custom_locations = {}  # Lưu trữ địa điểm người dùng tìm kiếm trực tuyến toàn quốc
+
 
 # ============================================================================
 # DANH MỤC ĐỊA ĐIỂM HIỆU CHUẨN GPS & GỢI Ý THÔNG MINH (RECOMMENDATION SYSTEM)
 # ============================================================================
 
+import json
 import math
 import re
+import urllib.parse
+import urllib.request
 from typing import Dict, List, Tuple
 
+# Danh mục các địa điểm trọng điểm được hiệu chuẩn GPS sẵn (Bắc - Trung - Nam)
 CALIBRATED_LOCATIONS = {
+    # --- MIỀN NAM: TP. HỒ CHÍ MINH & LÂN CẬN ---
     "ĐH Sư phạm Kỹ thuật TP.HCM (HCMUTE / ĐH SPKT - TP. Thủ Đức)": {
         "coords": [106.7722, 10.8507],
         "category": "🎓 Trường Đại học Trọng điểm",
         "address": "1 Võ Văn Ngân, P. Linh Chiểu, TP. Thủ Đức",
         "aliases": ["spkt", "đh spkt", "dh spkt", "dh spkt tp hcm", "spkt tp hcm", "hcmute", "su pham ky thuat", "thu duc"]
     },
-    "ĐH Bách Khoa CS1 (Quận 10)": {
+    "ĐH Bách Khoa CS1 (Quận 10, TP.HCM)": {
         "coords": [106.6578, 10.7725],
         "category": "🎓 Trường Đại học Trọng điểm",
-        "address": "268 Lý Thường Kiệt, P.14, Q.10",
+        "address": "268 Lý Thường Kiệt, P.14, Q.10, TP.HCM",
         "aliases": ["bk", "bach khoa", "dh bk", "dh bk cs1", "ly thuong kiet", "quan 10"]
     },
     "Bến xe Miền Đông Mới (TP. Thủ Đức)": {
@@ -108,13 +116,13 @@ CALIBRATED_LOCATIONS = {
     "ĐH Khoa học Tự nhiên CS1 (ĐHQG-HCM - Quận 5)": {
         "coords": [106.6826, 10.7628],
         "category": "🎓 Trường Đại học Trọng điểm",
-        "address": "227 Nguyễn Văn Cừ, P.4, Q.5",
+        "address": "227 Nguyễn Văn Cừ, P.4, Q.5, TP.HCM",
         "aliases": ["khtn", "dh khtn", "tu nhien", "nguyen van cu", "quan 5"]
     },
     "ĐH Kinh tế TP.HCM (UEH - Cơ sở A Quận 3)": {
         "coords": [106.6953, 10.7828],
         "category": "🎓 Trường Đại học Trọng điểm",
-        "address": "59C Nguyễn Đình Chiểu, P. Võ Thị Sáu, Q.3",
+        "address": "59C Nguyễn Đình Chiểu, P. Võ Thị Sáu, Q.3, TP.HCM",
         "aliases": ["ueh", "dh ueh", "kinh te", "nguyen dinh chieu", "quan 3"]
     },
     "ĐH Công nghệ Thông tin (UIT - ĐHQG-HCM)": {
@@ -126,25 +134,25 @@ CALIBRATED_LOCATIONS = {
     "ĐH Sài Gòn (SGU - Cơ sở chính Quận 5)": {
         "coords": [106.6800, 10.7597],
         "category": "🎓 Trường Đại học",
-        "address": "273 An Dương Vương, P.3, Q.5",
+        "address": "273 An Dương Vương, P.3, Q.5, TP.HCM",
         "aliases": ["sgu", "dh sai gon", "sai gon", "an duong vuong"]
     },
-    "Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)": {
+    "Sân bay Quốc tế Tân Sơn Nhất (Tân Bình, TP.HCM)": {
         "coords": [106.6602, 10.8185],
         "category": "✈️ Cảng hàng không",
-        "address": "Đường Trường Sơn, P.2, Q. Tân Bình",
+        "address": "Đường Trường Sơn, P.2, Q. Tân Bình, TP.HCM",
         "aliases": ["san bay", "tan son nhat", "tsn", "truong son", "tan binh"]
     },
-    "Chợ Bến Thành (Quận 1)": {
+    "Chợ Bến Thành (Quận 1, TP.HCM)": {
         "coords": [106.6983, 10.7726],
         "category": "🛍️ Thương mại & Du lịch",
-        "address": "Đường Lê Lợi, P. Bến Thành, Q.1",
+        "address": "Đường Lê Lợi, P. Bến Thành, Q.1, TP.HCM",
         "aliases": ["ben thanh", "cho ben thanh", "quan 1", "le loi"]
     },
-    "Bệnh viện Chợ Rẫy (Quận 5)": {
+    "Bệnh viện Chợ Rẫy (Quận 5, TP.HCM)": {
         "coords": [106.6593, 10.7554],
         "category": "🏥 Y tế khẩn cấp",
-        "address": "201B Nguyễn Chí Thanh, P.12, Q.5",
+        "address": "201B Nguyễn Chí Thanh, P.12, Q.5, TP.HCM",
         "aliases": ["cho ray", "bv cho ray", "benh vien", "nguyen chi thanh"]
     },
     "Khu Công nghệ cao (SHTP - TP. Thủ Đức)": {
@@ -159,49 +167,162 @@ CALIBRATED_LOCATIONS = {
         "address": "Xa lộ Hà Nội, P. Hiệp Phú, TP. Thủ Đức",
         "aliases": ["nga 4 thu duc", "nga tu thu duc", "le van viet"]
     },
-    "Bến xe Miền Tây (Bình Tân)": {
+    "Bến xe Miền Tây (Bình Tân, TP.HCM)": {
         "coords": [106.6133, 10.7410],
         "category": "🚌 Bến xe liên tỉnh",
-        "address": "395 Kinh Dương Vương, P. An Lạc, Q. Bình Tân",
+        "address": "395 Kinh Dương Vương, P. An Lạc, Q. Bình Tân, TP.HCM",
         "aliases": ["bx mien tay", "mien tay", "kinh duong vuong", "binh tan"]
     },
     "Bến xe An Sương (Quận 12 / Hóc Môn)": {
         "coords": [106.6111, 10.8447],
         "category": "🚌 Bến xe liên tỉnh",
-        "address": "Quốc Lộ 22, X. Bà Điểm, H. Hóc Môn",
+        "address": "Quốc Lộ 22, X. Bà Điểm, H. Hóc Môn, TP.HCM",
         "aliases": ["bx an suong", "an suong", "quoc lo 22", "hoc mon", "quan 12"]
     },
     "Landmark 81 / Vinhomes Central Park (Bình Thạnh)": {
         "coords": [106.7218, 10.7950],
         "category": "🏙️ Đô thị trung tâm",
-        "address": "720A Điện Biên Phủ, P.22, Q. Bình Thạnh",
+        "address": "720A Điện Biên Phủ, P.22, Q. Bình Thạnh, TP.HCM",
         "aliases": ["landmark 81", "landmark", "vinhomes", "binh thanh", "dien bien phu"]
+    },
+
+    # --- MIỀN TRUNG: ĐÀ NẴNG - HUẾ - NHA TRANG - ĐÀ LẠT ---
+    "Cầu Rồng (Hải Châu / Sơn Trà, Đà Nẵng)": {
+        "coords": [108.2279, 16.0612],
+        "category": "🌉 Biểu tượng Đô thị",
+        "address": "Đường Nguyễn Văn Linh, P. Phước Ninh, Q. Hải Châu, Đà Nẵng",
+        "aliases": ["cau rong", "da nang", "hai chau", "son tra", "nguyen van linh"]
+    },
+    "Bán đảo Sơn Trà (Sơn Trà, Đà Nẵng)": {
+        "coords": [108.2778, 16.1158],
+        "category": "🏞️ Sinh thái Du lịch",
+        "address": "Phường Thọ Quang, Q. Sơn Trà, TP. Đà Nẵng",
+        "aliases": ["son tra", "ban dao son tra", "chua linh ung", "da nang"]
+    },
+    "Đại Nội Huế (TP. Huế, Thừa Thiên Huế)": {
+        "coords": [107.5796, 16.4697],
+        "category": "🏛️ Di sản Văn hóa",
+        "address": "Đường 23 Tháng 8, P. Thuận Hòa, TP. Huế",
+        "aliases": ["dai noi", "hue", "hoang thanh", "thua thien hue"]
+    },
+    "Quảng trường Lâm Viên (TP. Đà Lạt, Lâm Đồng)": {
+        "coords": [108.4450, 11.9388],
+        "category": "🌸 Đô thị Cao nguyên",
+        "address": "Đường Trần Quốc Toản, P.10, TP. Đà Lạt, Lâm Đồng",
+        "aliases": ["lam vien", "da lat", "quang truong lam vien", "ho xuan huong"]
+    },
+    "Tháp Trầm Hương / Bãi biển Nha Trang (Khánh Hòa)": {
+        "coords": [109.1967, 12.2388],
+        "category": "🏖️ Đô thị Biển",
+        "address": "Đường Trần Phú, P. Lộc Thọ, TP. Nha Trang, Khánh Hòa",
+        "aliases": ["tram huong", "nha trang", "khanh hoa", "tran phu"]
+    },
+
+    # --- MIỀN BẮC: HÀ NỘI - HẢI PHÒNG - QUẢNG NINH ---
+    "Hồ Hoàn Kiếm (Quận Hoàn Kiếm, Hà Nội)": {
+        "coords": [105.8525, 21.0288],
+        "category": "🏙️ Trung tâm Thủ đô",
+        "address": "Phường Tràng Tiền, Q. Hoàn Kiếm, TP. Hà Nội",
+        "aliases": ["ho guom", "ho hoan kiem", "ha noi", "trang tien", "pho co"]
+    },
+    "ĐH Bách Khoa Hà Nội (Hai Bà Trưng, Hà Nội)": {
+        "coords": [105.8436, 21.0055],
+        "category": "🎓 Trường Đại học Trọng điểm",
+        "address": "1 Đại Cồ Việt, P. Bách Khoa, Q. Hai Bà Trưng, Hà Nội",
+        "aliases": ["bk ha noi", "hust", "bach khoa ha noi", "dai co viet"]
+    },
+    "Sân bay Quốc tế Nội Bài (Sóc Sơn, Hà Nội)": {
+        "coords": [105.8057, 21.2212],
+        "category": "✈️ Cảng hàng không",
+        "address": "Xã Phú Minh, Huyện Sóc Sơn, TP. Hà Nội",
+        "aliases": ["noi bai", "san bay noi bai", "ha noi", "soc son"]
+    },
+    "Nhà hát Lớn Hải Phòng (Quận Hồng Bàng, Hải Phòng)": {
+        "coords": [106.6838, 20.8596],
+        "category": "🏙️ Đô thị Cảng",
+        "address": "28 Trần Hưng Đạo, P. Hoàng Văn Thụ, Q. Hồng Bàng, Hải Phòng",
+        "aliases": ["hai phong", "nha hat lon hai phong", "hong bang"]
+    },
+
+    # --- ĐỒNG BẰNG SÔNG CỬU LONG & ĐÔNG NAM BỘ ---
+    "Bến Ninh Kiều (Ninh Kiều, Cần Thơ)": {
+        "coords": [105.7877, 10.0310],
+        "category": "🌊 Thủ phủ Miền Tây",
+        "address": "Đường Hai Bà Trưng, P. Tân An, Q. Ninh Kiều, Cần Thơ",
+        "aliases": ["ninh kieu", "ben ninh kieu", "can tho", "song hau"]
+    },
+    "Chợ nổi Cái Răng (Cái Răng, Cần Thơ)": {
+        "coords": [105.7483, 10.0051],
+        "category": "🛶 Du lịch Sông nước",
+        "address": "Đường Hai Bà Trưng, P. Lê Bình, Q. Cái Răng, Cần Thơ",
+        "aliases": ["cai rang", "cho noi cai rang", "can tho"]
+    },
+    "Bãi Trước Vũng Tàu (TP. Vũng Tàu, Bà Rịa - Vũng Tàu)": {
+        "coords": [107.0722, 10.3460],
+        "category": "🏖️ Đô thị Biển",
+        "address": "Đường Quang Trung, P.1, TP. Vũng Tàu, Bà Rịa - Vũng Tàu",
+        "aliases": ["vung tau", "bai truoc", "ba ria vung tau", "quang trung"]
     }
 }
 
 POPULAR_OD_RECOMMENDATIONS = {
     "⭐ [Tuyến Sinh Viên Đột Phá] ĐH Bách Khoa CS1 ➔ ĐH Sư phạm Kỹ thuật (HCMUTE)": (
-        "ĐH Bách Khoa CS1 (Quận 10)", "ĐH Sư phạm Kỹ thuật TP.HCM (HCMUTE / ĐH SPKT - TP. Thủ Đức)"
+        "ĐH Bách Khoa CS1 (Quận 10, TP.HCM)", "ĐH Sư phạm Kỹ thuật TP.HCM (HCMUTE / ĐH SPKT - TP. Thủ Đức)"
+    ),
+    "🌉 [Đà Nẵng Nội Đô] Cầu Rồng ➔ Bán đảo Sơn Trà": (
+        "Cầu Rồng (Hải Châu / Sơn Trà, Đà Nẵng)", "Bán đảo Sơn Trà (Sơn Trà, Đà Nẵng)"
+    ),
+    "🏛️ [Hà Nội Nội Đô] ĐH Bách Khoa Hà Nội ➔ Hồ Hoàn Kiếm": (
+        "ĐH Bách Khoa Hà Nội (Hai Bà Trưng, Hà Nội)", "Hồ Hoàn Kiếm (Quận Hoàn Kiếm, Hà Nội)"
+    ),
+    "🛶 [Đồng Bằng Sông Cửu Long] Bến Ninh Kiều (Cần Thơ) ➔ Chợ nổi Cái Răng": (
+        "Bến Ninh Kiều (Ninh Kiều, Cần Thơ)", "Chợ nổi Cái Răng (Cái Răng, Cần Thơ)"
+    ),
+    "🚗 [Liên Tỉnh Cao Tốc] Chợ Bến Thành (TP.HCM) ➔ Bãi Trước Vũng Tàu": (
+        "Chợ Bến Thành (Quận 1, TP.HCM)", "Bãi Trước Vũng Tàu (TP. Vũng Tàu, Bà Rịa - Vũng Tàu)"
+    ),
+    "🚅 [Liên Vùng Xuyên Việt] Hồ Hoàn Kiếm (Hà Nội) ➔ Chợ Bến Thành (TP.HCM)": (
+        "Hồ Hoàn Kiếm (Quận Hoàn Kiếm, Hà Nội)", "Chợ Bến Thành (Quận 1, TP.HCM)"
     ),
     "🎓 [Tuyến Kỹ Thuật Liên Trường] ĐH Sư phạm Kỹ thuật (HCMUTE) ➔ ĐH Bách Khoa CS2 (Khu ĐHQG TP.HCM)": (
         "ĐH Sư phạm Kỹ thuật TP.HCM (HCMUTE / ĐH SPKT - TP. Thủ Đức)", "ĐH Bách Khoa CS2 (Khu ĐHQG TP.HCM)"
-    ),
-    "💼 [Tuyến Công Nghệ Thủ Đức] ĐH Sư phạm Kỹ thuật (HCMUTE) ➔ Khu Công nghệ cao (SHTP - TP. Thủ Đức)": (
-        "ĐH Sư phạm Kỹ thuật TP.HCM (HCMUTE / ĐH SPKT - TP. Thủ Đức)", "Khu Công nghệ cao (SHTP - TP. Thủ Đức)"
-    ),
-    "✈️ [Tuyến Xuyên Tâm] ĐH Sư phạm Kỹ thuật (HCMUTE) ➔ Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)": (
-        "ĐH Sư phạm Kỹ thuật TP.HCM (HCMUTE / ĐH SPKT - TP. Thủ Đức)", "Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)"
-    ),
-    "🚌 [Tuyến Bến Xe Mới] ĐH Bách Khoa CS1 ➔ Bến xe Miền Đông Mới (TP. Thủ Đức)": (
-        "ĐH Bách Khoa CS1 (Quận 10)", "Bến xe Miền Đông Mới (TP. Thủ Đức)"
-    ),
-    "🏥 [Tuyến Y Tế Khẩn] Bến xe Miền Tây (Bình Tân) ➔ Bệnh viện Chợ Rẫy (Quận 5)": (
-        "Bến xe Miền Tây (Bình Tân)", "Bệnh viện Chợ Rẫy (Quận 5)"
-    ),
-    "🛍️ [Tuyến Trung Tâm] Chợ Bến Thành (Quận 1) ➔ Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)": (
-        "Chợ Bến Thành (Quận 1)", "Sân bay Quốc tế Tân Sơn Nhất (Tân Bình)"
     )
 }
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def geocode_vietnam_location(query: str) -> List[Dict]:
+    """
+    Tìm kiếm địa chỉ/địa danh trên toàn bộ 63 tỉnh thành Việt Nam qua OpenStreetMap Nominatim.
+    Không cần API key, độ trễ thấp, hỗ trợ từ cấp tỉnh/huyện đến từng số nhà, ngõ phố.
+    """
+    if not query or len(query.strip()) < 2:
+        return []
+    clean_q = query.strip()
+    search_q = clean_q if "việt nam" in clean_q.lower() or "vietnam" in clean_q.lower() else f"{clean_q}, Việt Nam"
+    encoded_q = urllib.parse.quote(search_q)
+    url = f"https://nominatim.openstreetmap.org/search?q={encoded_q}&format=json&countrycodes=vn&addressdetails=1&limit=4"
+    headers = {"User-Agent": "UrbanVibe-SafeRoute-MLAI2026/1.0 (contact: linh-nguyen123)"}
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results = []
+            for item in data:
+                raw_name = item.get("display_name", "")
+                parts = [p.strip() for p in raw_name.split(",") if p.strip()]
+                short_title = parts[0] if parts else clean_q
+                if len(parts) > 2:
+                    short_title = f"{parts[0]} ({parts[1]}, {parts[-2] if len(parts) > 3 else parts[-1]})"
+                results.append({
+                    "name": short_title,
+                    "full_address": raw_name,
+                    "coords": [round(float(item["lon"]), 5), round(float(item["lat"]), 5)],
+                    "category": f"🌐 {item.get('type', 'Địa điểm').replace('_', ' ').title()}"
+                })
+            return results
+    except Exception:
+        return []
 
 
 def normalize_vietnamese(text: str) -> str:
@@ -296,22 +417,29 @@ def generate_dynamic_route_geometries(
     route_c_pts[0] = [lon1, lat1]
     route_c_pts[-1] = [lon2, lat2]
 
-    # Điểm rủi ro âm thanh bố trí trên Tuyến A (giao lộ trục chính đông đúc)
+    # Điểm rủi ro âm thanh bố trí trên Tuyến A
     hs1_coords = [round(lon1 + 0.36 * dx + 0.012 * dist_deg * nx, 5), round(lat1 + 0.36 * dy + 0.012 * dist_deg * ny, 5)]
     hs2_coords = [round(lon1 + 0.72 * dx - 0.010 * dist_deg * nx, 5), round(lat1 + 0.72 * dy - 0.010 * dist_deg * ny, 5)]
 
+    if dist_deg < 0.25:
+        hs1_title = "Điểm rủi ro âm thanh 1: Nút giao Trục chính nội đô"
+        hs2_title = "Điểm rủi ro âm thanh 2: Giao lộ Vành đai đô thị"
+    else:
+        hs1_title = "Điểm rủi ro âm thanh 1: Nút giao Trạm thu phí / Tuyến xe tải liên tỉnh"
+        hs2_title = "Điểm rủi ro âm thanh 2: Cửa ngõ hành lang Quốc lộ / Cao tốc"
+
     hotspots = [
         {
-            "name": "Điểm rủi ro âm thanh 1: Nút giao Trục chính",
+            "name": hs1_title,
             "coordinates": hs1_coords,
             "ari": "9.6 / 10",
-            "reason": "Mật độ xe tải nặng cao, còi hơi vượt 112 dBA liên tục"
+            "reason": "Mật độ xe tải nặng / container cao, còi hơi vượt 112 dBA liên tục"
         },
         {
-            "name": "Điểm rủi ro âm thanh 2: Giao lộ Vành đai đô thị",
+            "name": hs2_title,
             "coordinates": hs2_coords,
             "ari": "9.3 / 10",
-            "reason": "Khu vực xe container phanh gấp và áp sát làn xe máy"
+            "reason": "Khu vực xe tải trọng lớn phanh gấp và áp sát làn phương tiện thô sơ"
         }
     ]
 
@@ -325,11 +453,11 @@ def generate_dynamic_route_geometries(
         {"text": "⚠️ Điểm rủi ro giao lộ", "coordinates": hs2_coords, "color": [248, 113, 113, 255]}
     ]
 
-    # Tính toán ViewState tâm và zoom tự thích ứng
+    # Tính toán ViewState tâm và zoom tự thích ứng (Từ cự ly nội đô zoom 13.5 đến cự ly toàn quốc zoom 5.0)
     mid_lat = (lat1 + lat2) / 2.0
     mid_lon = (lon1 + lon2) / 2.0
     span = max(abs(lat2 - lat1), abs(lon2 - lon1))
-    zoom = round(max(10.5, min(14.0, 13.2 - math.log2(max(span, 0.02) / 0.035))), 2)
+    zoom = round(max(5.0, min(14.0, 13.2 - math.log2(max(span, 0.02) / 0.035))), 2)
 
     return route_a_pts, route_b_pts, route_c_pts, hotspots, text_labels, (mid_lat, mid_lon, zoom)
 
@@ -629,48 +757,97 @@ else:
     ])
 
     # ------------------------------------------------------------------------
+    # ------------------------------------------------------------------------
     # TAB 1: PRE-TRIP DECISION INTELLIGENCE
     # ------------------------------------------------------------------------
     with tab_pre_trip:
-        st.markdown("#### 1. Thiết Lập Hành Trình & Gợi Ý Thông Minh (Location Recommender)")
-        st.caption("Gõ từ khóa bất kỳ (viết tắt, không dấu) hoặc chọn từ danh mục chuẩn hóa để cập nhật lộ trình và bản đồ không gian đa lớp tức thì:")
+        st.markdown("#### 1. Thiết Lập Hành Trình & Gợi Ý Toàn Quốc (Nationwide Recommender & Geocoding)")
+        st.caption("Gõ bất kỳ địa chỉ, ngõ phố, trường học, bệnh viện hoặc tỉnh thành trên cả nước để tìm kiếm trực tuyến thời gian thực (OpenStreetMap) hoặc chọn từ danh mục chuẩn hóa:")
 
-        # 1. Bộ Tìm Kiếm Địa Điểm Thông Minh & Đề Xuất Nhanh (Recommender Search)
+        all_locations = {**CALIBRATED_LOCATIONS, **st.session_state.custom_locations}
+
+        # 1. Bộ Tìm Kiếm Địa Điểm Toàn Quốc (Hybrid: Offline Hubs + Live OpenStreetMap Geocoding)
         search_query = st.text_input(
-            "🔍 Tìm kiếm nhanh địa điểm (Hỗ trợ viết tắt / không dấu: 'spkt', 'đh spkt tp hcm', 'hcmute', 'bách khoa', 'sân bay', 'quận 10'...):",
-            placeholder="Gõ từ khóa tìm kiếm (Ví dụ: dh spkt tp hcm, hcmute, bk cs1, san bay, cho ray)...",
+            "🔍 Tìm kiếm mọi địa điểm tại Việt Nam (VD: 'Hồ Hoàn Kiếm', 'Cầu Rồng Đà Nẵng', 'Bến Ninh Kiều', 'Quảng trường Lâm Viên Đà Lạt', '123 Hoàng Diệu', 'ĐH Quốc Gia', 'HCMUTE')...",
+            placeholder="Nhập tên trường, địa danh, số nhà hoặc xã/phường/tỉnh bất kỳ tại Việt Nam...",
             key="location_search_box"
         )
         if search_query:
-            matched_locs = search_calibrated_locations(search_query, CALIBRATED_LOCATIONS)
-            if matched_locs:
-                st.markdown(f"<div style='font-size: 13px; font-weight: bold; color: #38bdf8; margin-bottom: 6px;'>🎯 Gợi ý tìm kiếm ({len(matched_locs)} kết quả phù hợp):</div>", unsafe_allow_html=True)
-                for m_name in matched_locs[:3]:  # Top 3 kết quả phù hợp nhất
-                    m_meta = CALIBRATED_LOCATIONS[m_name]
+            # Bước A: Tìm trong danh mục offline + các điểm đã lưu
+            matched_locs = search_calibrated_locations(search_query, all_locations)
+            # Bước B: Tìm kiếm trực tuyến trên toàn lãnh thổ Việt Nam qua OSM Nominatim API
+            live_osm_results = geocode_vietnam_location(search_query)
+
+            has_results = bool(matched_locs or live_osm_results)
+            if has_results:
+                st.markdown(f"<div style='font-size: 13px; font-weight: bold; color: #38bdf8; margin-bottom: 8px;'>🎯 Kết quả tìm kiếm cho '{search_query}':</div>", unsafe_allow_html=True)
+
+                # Hiển thị kết quả hiệu chuẩn sẵn trước (nếu có)
+                for m_name in matched_locs[:2]:
+                    m_meta = all_locations[m_name]
                     c_res1, c_res2, c_res3 = st.columns([5, 2, 2])
                     with c_res1:
                         st.markdown(
                             f"<div style='background: #1e293b; padding: 6px 12px; border-radius: 6px; border-left: 3px solid #10b981;'>"
-                            f"📍 <b>{m_name}</b><br/>"
+                            f"📍 <b>{m_name}</b> <span style='font-size: 11px; background: #065f46; color: #a7f3d0; padding: 2px 6px; border-radius: 4px;'>Hiệu chuẩn</span><br/>"
                             f"<span style='font-size: 12px; color: #94a3b8;'>{m_meta.get('category')} · {m_meta.get('address')}</span>"
                             f"</div>",
                             unsafe_allow_html=True
                         )
                     with c_res2:
-                        if st.button("👉 Đặt làm Điểm đi", key=f"set_orig_{m_name}", use_container_width=True):
+                        if st.button("👉 Đặt làm Điểm đi", key=f"set_orig_hub_{m_name}", use_container_width=True):
                             st.session_state.origin = m_name
                             st.rerun()
                     with c_res3:
-                        if st.button("👉 Đặt làm Điểm đến", key=f"set_dest_{m_name}", use_container_width=True):
+                        if st.button("👉 Đặt làm Điểm đến", key=f"set_dest_hub_{m_name}", use_container_width=True):
                             st.session_state.destination = m_name
                             st.rerun()
+
+                # Hiển thị kết quả Geocoding trực tuyến OpenStreetMap toàn quốc (nếu có)
+                for i, osm_item in enumerate(live_osm_results[:3]):
+                    # Bỏ qua nếu tên đã trùng với điểm hiệu chuẩn đã hiển thị
+                    if osm_item["name"] in matched_locs:
+                        continue
+                    c_res1, c_res2, c_res3 = st.columns([5, 2, 2])
+                    with c_res1:
+                        st.markdown(
+                            f"<div style='background: #0f172a; padding: 6px 12px; border-radius: 6px; border-left: 3px solid #38bdf8;'>"
+                            f"🌐 <b>{osm_item['name']}</b> <span style='font-size: 11px; background: #075985; color: #bae6fd; padding: 2px 6px; border-radius: 4px;'>Bản đồ Toàn quốc (OSM)</span><br/>"
+                            f"<span style='font-size: 12px; color: #94a3b8;'>{osm_item.get('category')} · GPS: {osm_item.get('coords')}<br/><i>{osm_item.get('full_address')[:85]}...</i></span>"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
+                    with c_res2:
+                        if st.button("👉 Đặt làm Điểm đi", key=f"set_orig_osm_{i}", use_container_width=True):
+                            custom_key = f"{osm_item['name']}"
+                            st.session_state.custom_locations[custom_key] = {
+                                "coords": osm_item["coords"],
+                                "category": osm_item["category"],
+                                "address": osm_item["full_address"]
+                            }
+                            st.session_state.origin = custom_key
+                            st.rerun()
+                    with c_res3:
+                        if st.button("👉 Đặt làm Điểm đến", key=f"set_dest_osm_{i}", use_container_width=True):
+                            custom_key = f"{osm_item['name']}"
+                            st.session_state.custom_locations[custom_key] = {
+                                "coords": osm_item["coords"],
+                                "category": osm_item["category"],
+                                "address": osm_item["full_address"]
+                            }
+                            st.session_state.destination = custom_key
+                            st.rerun()
+
                 st.markdown("<hr style='margin: 10px 0; border-color: rgba(255,255,255,0.1);'/>", unsafe_allow_html=True)
             else:
-                st.info(f"Không tìm thấy vị trí khớp với '{search_query}'. Mời bạn chọn trực tiếp từ danh sách bên dưới.")
+                st.info(f"Đang tìm kiếm hoặc không tìm thấy địa điểm khớp với '{search_query}'. Vui lòng thử lại với từ khóa khác hoặc chọn bên dưới.")
+
+        # Cập nhật lại all_locations sau khi có thể có địa điểm tùy biến mới
+        all_locations = {**CALIBRATED_LOCATIONS, **st.session_state.custom_locations}
 
         # 2. Thanh Gợi Ý Tuyến Phổ Biến (Recommender System Presets)
         rec_keys = list(POPULAR_OD_RECOMMENDATIONS.keys())
-        rec_options = ["-- Chọn Tuyến Mẫu Đề Xuất (1-Click Tự Động Thiết Lập) --"] + rec_keys
+        rec_options = ["-- Chọn Tuyến Trọng Điểm Mẫu (Toàn Quốc & Nội Đô) --"] + rec_keys
 
         def on_select_preset_route():
             chosen = st.session_state.get("quick_preset_choice", "")
@@ -680,17 +857,23 @@ else:
                 st.session_state.destination = d
 
         st.selectbox(
-            "💡 Tuyến đường trọng điểm mẫu:",
+            "💡 Tuyến đường trọng điểm mẫu (Bắc - Trung - Nam & Tuyến Xuyên Việt):",
             options=rec_options,
             key="quick_preset_choice",
             on_change=on_select_preset_route
         )
 
         col_in1, col_in2, col_in3 = st.columns([2, 2, 2])
-        loc_names = list(CALIBRATED_LOCATIONS.keys())
-        
-        orig_idx = loc_names.index(st.session_state.origin) if st.session_state.origin in loc_names else 0
-        dest_idx = loc_names.index(st.session_state.destination) if st.session_state.destination in loc_names else 1
+        loc_names = list(all_locations.keys())
+
+        # Đảm bảo origin và destination có trong danh sách lựa chọn
+        if st.session_state.origin not in loc_names:
+            loc_names.insert(0, st.session_state.origin)
+        if st.session_state.destination not in loc_names:
+            loc_names.append(st.session_state.destination)
+
+        orig_idx = loc_names.index(st.session_state.origin)
+        dest_idx = loc_names.index(st.session_state.destination)
 
         with col_in1:
             st.session_state.origin = st.selectbox(
@@ -698,10 +881,10 @@ else:
                 options=loc_names,
                 index=orig_idx
             )
-            orig_meta = CALIBRATED_LOCATIONS.get(st.session_state.origin, {})
+            orig_meta = all_locations.get(st.session_state.origin, {})
             st.markdown(
                 f"<div style='font-size: 11px; color: #a7f3d0; background: #064e3b; padding: 4px 8px; border-radius: 6px; margin-top: -6px;'>"
-                f"📍 <b>GPS:</b> {orig_meta.get('coords')} · <i>{orig_meta.get('address')}</i>"
+                f"📍 <b>GPS:</b> {orig_meta.get('coords')} · <i>{orig_meta.get('address', 'Địa chỉ bản đồ OSM')}</i>"
                 f"</div>",
                 unsafe_allow_html=True
             )
@@ -712,10 +895,10 @@ else:
                 options=loc_names,
                 index=dest_idx
             )
-            dest_meta = CALIBRATED_LOCATIONS.get(st.session_state.destination, {})
+            dest_meta = all_locations.get(st.session_state.destination, {})
             st.markdown(
                 f"<div style='font-size: 11px; color: #fecaca; background: #450a0a; padding: 4px 8px; border-radius: 6px; margin-top: -6px;'>"
-                f"🏁 <b>GPS:</b> {dest_meta.get('coords')} · <i>{dest_meta.get('address')}</i>"
+                f"🏁 <b>GPS:</b> {dest_meta.get('coords')} · <i>{dest_meta.get('address', 'Địa chỉ bản đồ OSM')}</i>"
                 f"</div>",
                 unsafe_allow_html=True
             )
@@ -742,8 +925,8 @@ else:
             f"(Ràng buộc an toàn cứng: $ARI_{{max}} \\le {active_profile.tau_cutoff:.1f}$)"
         )
 
-        orig_pos = CALIBRATED_LOCATIONS.get(st.session_state.origin, {}).get("coords", [106.6578, 10.7725])
-        dest_pos = CALIBRATED_LOCATIONS.get(st.session_state.destination, {}).get("coords", [106.7722, 10.8507])
+        orig_pos = all_locations.get(st.session_state.origin, {}).get("coords", [106.6578, 10.7725])
+        dest_pos = all_locations.get(st.session_state.destination, {}).get("coords", [106.7722, 10.8507])
 
         decision_resp = generate_mock_decision_response(
             origin=st.session_state.origin,

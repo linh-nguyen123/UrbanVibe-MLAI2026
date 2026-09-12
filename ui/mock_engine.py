@@ -191,15 +191,28 @@ def generate_mock_decision_response(
     # Tránh khoảng cách 0 nếu trùng điểm
     dist_direct = max(1.8, dist_direct)
 
-    # Tính toán cự ly thực tế qua mạng lưới giao thông đô thị
+    # Tính toán cự ly thực tế qua mạng lưới giao thông đô thị / liên tỉnh
     dist_a = max(2.4, round(dist_direct * 1.22, 1))
     dist_b = max(2.7, round(dist_direct * 1.34, 1))
     dist_c = max(3.1, round(dist_direct * 1.56, 1))
 
-    # Thời gian di chuyển ước lượng (vận tốc trung bình ~25 km/h trong giờ cao điểm)
-    dur_a = max(7.0, round((dist_a / 25.0) * 60.0, 0))
-    dur_b = max(9.0, round(dur_a * 1.28, 0))   # Chấp nhận thêm ~28% thời gian
-    dur_c = max(12.0, round(dur_a * 1.62, 0))  # Vành đai xa thêm ~62% thời gian
+    # Thời gian di chuyển ước lượng:
+    # - Nội đô (<35 km): ~25 km/h
+    # - Liên tỉnh gần (35 - 150 km): ~50 km/h
+    # - Liên vùng / Toàn quốc (>150 km): ~65 km/h
+    if dist_direct < 35.0:
+        avg_speed = 25.0
+        truck_factor = 1.8
+    elif dist_direct < 150.0:
+        avg_speed = 50.0
+        truck_factor = 0.6
+    else:
+        avg_speed = 65.0
+        truck_factor = 0.35
+
+    dur_a = max(7.0, round((dist_a / avg_speed) * 60.0, 0))
+    dur_b = max(9.0, round(dur_a * 1.25, 0))   # Chấp nhận thêm ~25% thời gian để an toàn
+    dur_c = max(12.0, round(dur_a * 1.55, 0))  # Vành đai xa thêm ~55% thời gian
 
     # Định nghĩa 3 kịch bản lộ trình chuẩn thực địa
     # Tuyến A: Trục chính (Nhanh nhất nhưng nhiều xe tải và còi hơi)
@@ -213,13 +226,13 @@ def generate_mock_decision_response(
         ari_p90=9.7,
         composite_ari_eval=0.6 * 8.4 + 0.4 * 9.7,  # 8.92
         uncertainty_penalty=0.08,
-        truck_exposure_count=max(4, int(dist_a * 1.8)),
+        truck_exposure_count=max(4, int(dist_a * truck_factor)),
         mcda_cost=0.0,
         is_pareto_optimal=True,
         is_recommended=False,
         xai_explanation=(
             f"⚠️ Tuyến nhanh nhất ({dur_a:.0f} phút) nhưng có mức rủi ro âm thanh rất cao (ARI 8.4/10). "
-            f"Người lái bị phơi nhiễm khoảng {max(4, int(dist_a * 1.8))} lượt xe tải nặng và đi qua các nút giao điểm đen bạo lực âm thanh."
+            f"Người lái bị phơi nhiễm khoảng {max(4, int(dist_a * truck_factor))} lượt xe tải nặng và đi qua các nút giao điểm đen bạo lực âm thanh."
         ),
         waypoints=[
             (orig_coords[1], orig_coords[0]) if orig_coords else (10.772, 106.657),
