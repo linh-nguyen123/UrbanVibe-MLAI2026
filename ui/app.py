@@ -32,6 +32,9 @@ from ui.mock_engine import (
     generate_mock_payload,
     generate_mock_decision_response
 )
+from engine.decision_engine import DecisionEngine
+from engine.main_engine import MainEngine
+from engine.audio_stream import AudioStreamWorker
 
 # ============================================================================
 # CẤU HÌNH TRANG STREAMLIT
@@ -468,12 +471,31 @@ def generate_dynamic_route_geometries(
 # ============================================================================
 
 def on_trigger_event(event_type: str):
-    """Callback chạy TRƯỚC KHI Streamlit render UI, đảm bảo phản hồi tức thì 100%."""
     st.session_state.current_payload = generate_mock_payload(force_danger_type=event_type)
 
 def on_toggle_rider_mode():
-    """Bật/tắt chế độ lái xe toàn màn hình."""
     st.session_state.rider_mode = not st.session_state.rider_mode
+
+def on_toggle_live_audio():
+    new_state = not st.session_state.get("live_audio_mode", False)
+    st.session_state.live_audio_mode = new_state
+    try:
+        engine = MainEngine.get_instance()
+        if new_state:
+            engine.start_live_stream()
+            st.session_state.system_status = "HEALTHY"
+        else:
+            engine.stop_live_stream()
+    except Exception:
+        st.session_state.system_status = "DEGRADED"
+
+def check_live_audio_update():
+    if st.session_state.get("live_audio_mode", False):
+        try:
+            engine = MainEngine.get_instance()
+            st.session_state.current_payload = engine.get_latest_payload()
+        except Exception:
+            st.session_state.system_status = "DEGRADED"
 
 
 # ============================================================================
@@ -641,6 +663,7 @@ if not st.session_state.rider_mode:
 # GIAO DIỆN CHÍNH (XỬ LÝ RIÊNG KHI BẬT RIDER FULLSCREEN MODE)
 # ============================================================================
 
+check_live_audio_update()
 payload = st.session_state.current_payload
 
 # NẾU ĐANG Ở CHẾ ĐỘ LÁI XE TOÀN MÀN HÌNH (RIDER MODE)
@@ -929,7 +952,8 @@ else:
         orig_pos = all_locations.get(st.session_state.origin, {}).get("coords", [106.6578, 10.7725])
         dest_pos = all_locations.get(st.session_state.destination, {}).get("coords", [106.7722, 10.8507])
 
-        decision_resp = generate_mock_decision_response(
+        decision_engine = DecisionEngine(tau_cutoff=active_profile.tau_cutoff)
+        decision_resp = decision_engine.plan_trip(
             origin=st.session_state.origin,
             destination=st.session_state.destination,
             profile=active_profile,
@@ -1073,6 +1097,8 @@ else:
     # TAB 2: ON-TRIP HUD (CHẾ ĐỘ THÔNG THƯỜNG CÓ NÚT BẬT RIDER MODE)
     # ------------------------------------------------------------------------
     with tab_on_trip:
+        check_live_audio_update()
+        payload = st.session_state.current_payload
         active_scen = None
         for s in decision_resp.scenarios:
             if s.scenario_id == st.session_state.selected_scenario_id:
@@ -1182,6 +1208,13 @@ else:
         with col_controls:
             st.subheader("Bộ Phím Thử Nghiệm Tức Thì")
             st.caption("Ứng dụng callback giúp phản xạ cập nhật giao diện trong <50ms:")
+
+            st.toggle(
+                "Live Microphone Feed (AudioStreamWorker)",
+                value=st.session_state.get("live_audio_mode", False),
+                on_change=on_toggle_live_audio,
+                help="Enable 16kHz continuous background stream with YAMNet TFLite inference",
+            )
 
             st.button("🚛 Kích hoạt Xe Tải Áp Sát (Phải)", on_click=on_trigger_event, args=("LOOMING_TRUCK",), use_container_width=True)
             st.button("🚗 Kích hoạt Còi Xe Máy (Trái)", on_click=on_trigger_event, args=("VEHICLE_HORN",), use_container_width=True)
