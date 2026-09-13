@@ -1,6 +1,45 @@
 import math
+import time
 from typing import List, Dict, Any, Optional, Tuple
-from data_contract import RouteScenario, UserPreferenceProfile, DecisionResponse
+from data_contract import (
+    RouteScenario,
+    RouteSegment,
+    UserPreferenceProfile,
+    DecisionResponse,
+)
+
+
+def calculate_haversine_distance(coord1: List[float], coord2: List[float]) -> float:
+    lon1, lat1 = coord1
+    lon2, lat2 = coord2
+    radius_km = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2.0) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(dlon / 2.0) ** 2
+    )
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return radius_km * c
+
+
+def generate_arc_waypoints(
+    start: List[float], end: List[float], num_points: int = 12, offset_ratio: float = 0.0
+) -> List[Tuple[float, float]]:
+    lon1, lat1 = start
+    lon2, lat2 = end
+    points = []
+    for i in range(num_points):
+        fraction = float(i) / float(num_points - 1)
+        base_lon = lon1 + fraction * (lon2 - lon1)
+        base_lat = lat1 + fraction * (lat2 - lat1)
+        perp_offset = math.sin(fraction * math.pi) * offset_ratio
+        pt_lon = round(base_lon - perp_offset * (lat2 - lat1), 5)
+        pt_lat = round(base_lat + perp_offset * (lon2 - lon1), 5)
+        points.append((pt_lat, pt_lon))
+    return points
 
 
 class DecisionEngine:
@@ -66,7 +105,10 @@ class DecisionEngine:
                         is_dominated = True
                         break
             if not is_dominated:
+                sc_i.is_pareto_optimal = True
                 pareto_list.append(sc_i)
+            else:
+                sc_i.is_pareto_optimal = False
 
         return pareto_list
 
@@ -84,7 +126,7 @@ class DecisionEngine:
         ari_norm = min(1.0, max(0.0, ari_eval / 10.0))
         u_norm = min(1.0, max(0.0, uncert / u_max)) if u_max > 0 else 0.0
 
-        cost = (profile.w_time * t_norm) + (profile.w_ari * ari_norm) + (profile.w_uncert * u_norm)
+        cost = (profile.w_time * t_norm) + (profile.w_ari * ari_norm) + (profile.w_uncertainty * u_norm)
         return round(cost, 4)
 
     def generate_xai_explanation(
@@ -106,19 +148,19 @@ class DecisionEngine:
         delta_ari = round(fast_ari - rec_ari, 2)
         ari_reduction_pct = round((delta_ari / fast_ari) * 100, 1) if fast_ari > 0 else 0.0
 
-        if recommended.route_id == fastest.route_id:
+        if recommended.scenario_id == fastest.scenario_id:
             text = (
                 f"{recommended.name} is the optimal choice under '{profile.name}' preferences: "
-                f"Fastest travel time ({recommended.time_min:.1f} min) with an acoustic risk level of "
+                f"Fastest travel time ({recommended.time_min:.1f} min) with acoustic risk controlled at "
                 f"ARI={rec_ari:.1f}/10."
             )
         elif ari_reduction_pct > 0:
             text = (
                 f"{recommended.name} is recommended: Takes {delta_time:.1f} min longer (+{time_ratio_pct}%) "
-                f"to reduce acoustic risk by {ari_reduction_pct}% (ARI from {fast_ari:.1f} to {rec_ari:.1f}/10)"
+                f"to reduce acoustic risk by {ari_reduction_pct}% (ARI from {fast_ari:.1f} down to {rec_ari:.1f}/10)"
             )
             if recommended.truck_density < fastest.truck_density:
-                text += f" and avoids high truck density areas ({recommended.truck_density*100:.0f}% vs {fastest.truck_density*100:.0f}%)."
+                text += f" and avoids high truck density corridors ({recommended.truck_density*100:.0f}% vs {fastest.truck_density*100:.0f}%)."
             else:
                 text += "."
         else:
@@ -139,7 +181,11 @@ class DecisionEngine:
             "ari_reduction_score": delta_ari,
             "ari_reduction_pct": ari_reduction_pct,
             "profile_used": profile.name,
-            "weights": {"w_time": profile.w_time, "w_ari": profile.w_ari, "w_uncert": profile.w_uncert},
+            "weights": {
+                "w_time": profile.w_time,
+                "w_ari": profile.w_ari,
+                "w_uncertainty": profile.w_uncertainty,
+            },
         }
 
         return text, metadata
@@ -148,6 +194,8 @@ class DecisionEngine:
         self,
         scenarios: List[RouteScenario],
         profile: Optional[UserPreferenceProfile] = None,
+        origin: str = "Origin",
+        destination: str = "Destination",
     ) -> DecisionResponse:
         if profile is None:
             profile = UserPreferenceProfile.balanced()
@@ -158,13 +206,17 @@ class DecisionEngine:
                 sc.uncertainty = self.compute_bayesian_uncertainty(sc.n_trips)
             sc.is_recommended = False
 
-        valid_scenarios, filtered_out = self.filter_hard_safety_constraints(scenarios)
+        valid_scenarios, filtered_out = self.filter_hard_safety_constraints(scenarios, tau_cutoff=self.tau_cutoff)
         if not valid_scenarios:
             return DecisionResponse(
-                pareto_scenarios=[],
-                recommended_scenario=None,
+                origin=origin,
+                destination=destination,
+                timestamp=time.time(),
+                active_profile=profile,
+                scenarios=scenarios,
+                recommended_scenario_id="",
+                pareto_count=0,
                 tradeoff_metadata={"error": "All route candidates violated the hard safety constraint."},
-                all_scenarios=scenarios,
                 filtered_out_scenarios=filtered_out,
             )
 
@@ -187,73 +239,172 @@ class DecisionEngine:
         best.xai_explanation = xai_text
 
         return DecisionResponse(
-            pareto_scenarios=pareto_scenarios,
-            recommended_scenario=best,
+            origin=origin,
+            destination=destination,
+            timestamp=time.time(),
+            active_profile=profile,
+            scenarios=scenarios,
+            recommended_scenario_id=best.scenario_id,
+            pareto_count=len(pareto_scenarios),
             tradeoff_metadata=tradeoff_meta,
-            all_scenarios=scenarios,
             filtered_out_scenarios=filtered_out,
+        )
+
+    def plan_trip(
+        self,
+        origin: str,
+        destination: str,
+        profile: Optional[UserPreferenceProfile] = None,
+        orig_coords: Optional[List[float]] = None,
+        dest_coords: Optional[List[float]] = None,
+    ) -> DecisionResponse:
+        if profile is None:
+            profile = UserPreferenceProfile.balanced()
+
+        if orig_coords and dest_coords:
+            dist_direct = calculate_haversine_distance(orig_coords, dest_coords)
+            p_start = orig_coords
+            p_end = dest_coords
+        else:
+            dist_direct = 9.2
+            p_start = [106.6578, 10.7725]
+            p_end = [106.7722, 10.8507]
+
+        dist_direct = max(1.8, dist_direct)
+        dist_a = max(2.4, round(dist_direct * 1.22, 1))
+        dist_b = max(2.7, round(dist_direct * 1.34, 1))
+        dist_c = max(3.1, round(dist_direct * 1.56, 1))
+
+        if dist_direct < 35.0:
+            avg_speed = 25.0
+            truck_mult = 1.8
+        elif dist_direct < 150.0:
+            avg_speed = 50.0
+            truck_mult = 0.6
+        else:
+            avg_speed = 65.0
+            truck_mult = 0.3
+
+        dur_a = max(6.0, round((dist_a / (avg_speed * 1.15)) * 60.0))
+        dur_b = max(8.0, round((dist_b / avg_speed) * 60.0))
+        dur_c = max(12.0, round((dist_c / (avg_speed * 0.75)) * 60.0))
+
+        wp_a = generate_arc_waypoints(p_start, p_end, 14, offset_ratio=0.08)
+        wp_b = generate_arc_waypoints(p_start, p_end, 14, offset_ratio=-0.12)
+        wp_c = generate_arc_waypoints(p_start, p_end, 14, offset_ratio=0.22)
+
+        scenarios = [
+            RouteScenario(
+                scenario_id="SCENARIO_A",
+                title="Route A (Highway Arterial - Fastest)",
+                route_summary="Highway Express / Heavy Truck Corridor",
+                duration_min=dur_a,
+                distance_km=dist_a,
+                avg_ari=8.2,
+                ari_p90=9.1,
+                uncertainty_penalty=0.08,
+                truck_exposure_count=max(2, int(round(dist_a * truck_mult))),
+                waypoints=wp_a,
+                n_trips=180,
+                ari_max=8.9,
+            ),
+            RouteScenario(
+                scenario_id="SCENARIO_B",
+                title="Route B (SafeRoute - Recommended)",
+                route_summary="Service Roads & Acoustic Buffer Corridor",
+                duration_min=dur_b,
+                distance_km=dist_b,
+                avg_ari=1.8,
+                ari_p90=2.4,
+                uncertainty_penalty=0.10,
+                truck_exposure_count=max(0, int(round(dist_b * truck_mult * 0.15))),
+                waypoints=wp_b,
+                n_trips=120,
+                ari_max=3.5,
+            ),
+            RouteScenario(
+                scenario_id="SCENARIO_C",
+                title="Route C (Transit & Green Belt)",
+                route_summary="Urban Green Belt / Dedicated Mobility Lane",
+                duration_min=dur_c,
+                distance_km=dist_c,
+                avg_ari=0.6,
+                ari_p90=0.9,
+                uncertainty_penalty=0.14,
+                truck_exposure_count=0,
+                waypoints=wp_c,
+                n_trips=65,
+                ari_max=1.2,
+            ),
+        ]
+
+        return self.evaluate(
+            scenarios=scenarios,
+            profile=profile,
+            origin=origin,
+            destination=destination,
         )
 
     @staticmethod
     def get_benchmark_scenarios() -> List[RouteScenario]:
         return [
             RouteScenario(
-                route_id="ROUTE_A",
-                name="Route A (Highway - Fastest)",
-                time_min=20.0,
+                scenario_id="ROUTE_A",
+                title="Route A (Highway - Fastest)",
+                duration_min=20.0,
                 distance_km=12.5,
-                ari_mean=8.5,
+                avg_ari=8.5,
                 ari_p90=9.2,
-                uncertainty=0.08,
-                truck_density=0.85,
+                uncertainty_penalty=0.08,
+                truck_exposure_count=8,
                 ari_max=8.9,
                 n_trips=150,
             ),
             RouteScenario(
-                route_id="ROUTE_B",
-                name="Route B (SafeRoute - Recommended)",
-                time_min=27.0,
+                scenario_id="ROUTE_B",
+                title="Route B (SafeRoute - Recommended)",
+                duration_min=27.0,
                 distance_km=13.8,
-                ari_mean=1.8,
+                avg_ari=1.8,
                 ari_p90=2.4,
-                uncertainty=0.10,
-                truck_density=0.15,
+                uncertainty_penalty=0.10,
+                truck_exposure_count=2,
                 ari_max=3.5,
                 n_trips=95,
             ),
             RouteScenario(
-                route_id="ROUTE_C",
-                name="Route C (Transit & Green Corridor)",
-                time_min=38.0,
+                scenario_id="ROUTE_C",
+                title="Route C (Transit & Green Corridor)",
+                duration_min=38.0,
                 distance_km=14.2,
-                ari_mean=0.5,
+                avg_ari=0.5,
                 ari_p90=0.8,
-                uncertainty=0.14,
-                truck_density=0.05,
+                uncertainty_penalty=0.14,
+                truck_exposure_count=0,
                 ari_max=1.2,
                 n_trips=50,
             ),
             RouteScenario(
-                route_id="ROUTE_D",
-                name="Route D (Pareto Dominated)",
-                time_min=35.0,
+                scenario_id="ROUTE_D",
+                title="Route D (Pareto Dominated)",
+                duration_min=35.0,
                 distance_km=15.0,
-                ari_mean=8.8,
+                avg_ari=8.8,
                 ari_p90=9.4,
-                uncertainty=0.25,
-                truck_density=0.90,
+                uncertainty_penalty=0.25,
+                truck_exposure_count=9,
                 ari_max=8.9,
                 n_trips=15,
             ),
             RouteScenario(
-                route_id="ROUTE_E",
-                name="Route E (Safety Cutoff Exceeded)",
-                time_min=18.0,
+                scenario_id="ROUTE_E",
+                title="Route E (Safety Cutoff Exceeded)",
+                duration_min=18.0,
                 distance_km=11.0,
-                ari_mean=7.0,
+                avg_ari=7.0,
                 ari_p90=9.6,
-                uncertainty=0.05,
-                truck_density=0.80,
+                uncertainty_penalty=0.05,
+                truck_exposure_count=8,
                 ari_max=9.8,
                 n_trips=200,
             ),
