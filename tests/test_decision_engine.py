@@ -70,6 +70,38 @@ class TestDecisionEngine(unittest.TestCase):
         self.assertIn("recommended_scenario", res_dict)
         self.assertIn("tradeoff_metadata", res_dict)
 
+    def test_issue_checklist_coverage(self):
+        p = UserPreferenceProfile.balanced()
+        self.assertEqual(len(p.w), 3)
+        self.assertEqual(p.w, [p.w_t, p.w_a, p.w_u])
+
+        sc = RouteScenario(
+            scenario_id="SCEN_1",
+            title="Route 1",
+            duration_min=15.0,
+            distance_km=5.2,
+            avg_ari=4.5,
+            ari_p90=6.2,
+            uncertainty_penalty=0.25,
+            truck_density=0.3,
+            xai_explanation="Test explanation",
+            is_recommended=True,
+        )
+        self.assertEqual(sc.scenario_id, "SCEN_1")
+        self.assertEqual(sc.route_name, "Route 1")
+        self.assertEqual(sc.duration_min, 15.0)
+        self.assertEqual(sc.distance_km, 5.2)
+        self.assertEqual(sc.avg_ari, 4.5)
+        self.assertEqual(sc.p90_ari, 6.2)
+        self.assertEqual(sc.bayesian_uncertainty, 0.25)
+        self.assertEqual(sc.truck_density, 0.3)
+        self.assertEqual(sc.xai_explanation, "Test explanation")
+        self.assertTrue(sc.is_recommended)
+
+        ari_eval = self.engine.compute_ari_eval(sc)
+        expected_ari_eval = 0.6 * sc.avg_ari + 0.4 * sc.p90_ari
+        self.assertAlmostEqual(ari_eval, expected_ari_eval, places=2)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -64,6 +64,22 @@ class UserPreferenceProfile:
     def w_uncert(self, val: float):
         self.w_uncertainty = val
 
+    @property
+    def w(self) -> List[float]:
+        return [self.w_time, self.w_ari, self.w_uncertainty]
+
+    @property
+    def w_t(self) -> float:
+        return self.w_time
+
+    @property
+    def w_a(self) -> float:
+        return self.w_ari
+
+    @property
+    def w_u(self) -> float:
+        return self.w_uncertainty
+
     @classmethod
     def safe_first(cls) -> "UserPreferenceProfile":
         return cls(
@@ -232,6 +248,30 @@ class RouteScenario:
     @ari_mean.setter
     def ari_mean(self, val: float):
         self.avg_ari = val
+
+    @property
+    def route_name(self) -> str:
+        return self.title
+
+    @route_name.setter
+    def route_name(self, val: str):
+        self.title = val
+
+    @property
+    def p90_ari(self) -> float:
+        return self.ari_p90
+
+    @p90_ari.setter
+    def p90_ari(self, val: float):
+        self.ari_p90 = val
+
+    @property
+    def bayesian_uncertainty(self) -> float:
+        return self.uncertainty_penalty
+
+    @bayesian_uncertainty.setter
+    def bayesian_uncertainty(self, val: float):
+        self.uncertainty_penalty = val
 
     @property
     def uncertainty(self) -> float:
